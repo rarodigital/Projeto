@@ -95,17 +95,17 @@ class RemoteAccessibilityService : AccessibilityService() {
                 if (scrollable.performAction(act)) return true
             }
         }
-        // 3) fallback universal: deslize curto no sentido do movimento (UIs de toque)
+        // 3) fallback: deslize LONGO e firme (nunca um toque, pra não "abrir" sem querer)
         val (w, h) = screenSize()
         val cx = w / 2
         val cy = h / 2
-        val dx = (w * 0.15f).toInt()
-        val dy = (h * 0.15f).toInt()
+        val dx = (w * 0.32f).toInt()
+        val dy = (h * 0.32f).toInt()
         when (direction) {
-            View.FOCUS_DOWN -> swipe(cx, cy, cx, cy - dy, 90)
-            View.FOCUS_UP -> swipe(cx, cy, cx, cy + dy, 90)
-            View.FOCUS_RIGHT -> swipe(cx, cy, cx - dx, cy, 90)
-            View.FOCUS_LEFT -> swipe(cx, cy, cx + dx, cy, 90)
+            View.FOCUS_DOWN -> swipe(cx, cy, cx, cy - dy, 180)
+            View.FOCUS_UP -> swipe(cx, cy, cx, cy + dy, 180)
+            View.FOCUS_RIGHT -> swipe(cx, cy, cx - dx, cy, 180)
+            View.FOCUS_LEFT -> swipe(cx, cy, cx + dx, cy, 180)
         }
         return true
     }
