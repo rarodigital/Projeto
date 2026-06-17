@@ -11,7 +11,18 @@ import java.net.URLEncoder
  */
 class BoxReceiverController {
 
-    companion object { const val PORT = 8787 }
+    companion object {
+        const val PORT = 8787
+        /** Consulta o modelo do aparelho (Build.MODEL) num IP. Null se não responder. */
+        fun fetchInfo(ip: String): String? = try {
+            val conn = (URL("http://$ip:$PORT/info").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"; connectTimeout = 2500; readTimeout = 2500
+            }
+            try {
+                if (conn.responseCode in 200..299) conn.inputStream.bufferedReader().use { it.readText() }.trim() else null
+            } finally { conn.disconnect() }
+        } catch (_: Exception) { null }
+    }
 
     var host: String = ""
         private set
@@ -66,9 +77,14 @@ class BoxReceiverController {
             RemoteAction.MUTE -> "/vol/mute"
             RemoteAction.POWER -> "/power"
             RemoteAction.PLAY_PAUSE -> "/media/playpause"
+            RemoteAction.CHANNEL_UP -> "/key/UP"
+            RemoteAction.CHANNEL_DOWN -> "/key/DOWN"
         }
         get(path)
     }
+
+    /** Aponta pra um Box já conhecido sem precisar pingar (troca de aparelho). */
+    fun setHost(ip: String) { host = ip.trim(); connected = true }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 

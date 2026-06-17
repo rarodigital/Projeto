@@ -68,6 +68,8 @@ class TvBoxController {
             RemoteAction.MUTE -> 164
             RemoteAction.POWER -> 26
             RemoteAction.PLAY_PAUSE -> 85
+            RemoteAction.CHANNEL_UP -> 166
+            RemoteAction.CHANNEL_DOWN -> 167
         }
         keyevent(code)
     }

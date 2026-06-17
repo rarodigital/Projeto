@@ -91,5 +91,10 @@ class LgTvController {
         RemoteAction.MUTE -> 26
         RemoteAction.POWER -> 1
         RemoteAction.PLAY_PAUSE -> 33
+        RemoteAction.CHANNEL_UP -> 27
+        RemoteAction.CHANNEL_DOWN -> 28
     }
+
+    /** Define o IP de uma TV LG já pareada (pra trocar de aparelho sem reparear). */
+    fun useHost(ip: String) { host = ip.trim(); paired = true }
 }

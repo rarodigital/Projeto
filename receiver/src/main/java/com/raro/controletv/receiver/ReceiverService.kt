@@ -125,6 +125,8 @@ class ReceiverService : Service() {
 
             path == "/size" -> sizeStr()
 
+            path == "/info" -> "${Build.MANUFACTURER} ${Build.MODEL}"
+
             path == "/tap" -> {
                 val x = params["x"]?.toIntOrNull(); val y = params["y"]?.toIntOrNull()
                 if (acc == null) "no-accessibility"

@@ -16,6 +16,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -217,7 +218,13 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     var boxIp by remember { mutableStateOf(prefs.getString("ip", "") ?: "") }
     var boxMode by remember { mutableStateOf(prefs.getString("boxmode", "receiver") ?: "receiver") }
     var scanning by remember { mutableStateOf(false) }
-    var found by remember { mutableStateOf(listOf<String>()) }
+    var found by remember { mutableStateOf(listOf<Pair<String, String>>()) }  // ip, modelo
+
+    // Aparelhos salvos
+    var devices by remember { mutableStateOf(DeviceStore.load(prefs)) }
+    var activeId by remember { mutableStateOf(DeviceStore.activeId(prefs)) }
+    var showSaveDevice by remember { mutableStateOf(false) }
+    var newDevName by remember { mutableStateOf("") }
 
     var lgIp by remember { mutableStateOf(prefs.getString("lg_ip", "") ?: "") }
     var lgPin by remember { mutableStateOf("") }
@@ -279,17 +286,52 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     fun scanReceiver() {
         scanning = true; found = emptyList(); status = "Procurando o Box na rede..."
         scope.launch {
-            val list = withContext(Dispatchers.IO) { NetworkScanner.scan(port = BoxReceiverController.PORT) }
-            found = list; scanning = false
-            status = if (list.isEmpty()) "Não achei o app do Box. Instalou e ligou o receptor?" else "Achei ${list.size}. Toque pra conectar."
+            val ips = withContext(Dispatchers.IO) { NetworkScanner.scan(port = BoxReceiverController.PORT) }
+            val withModel = withContext(Dispatchers.IO) { ips.map { it to (BoxReceiverController.fetchInfo(it) ?: "") } }
+            found = withModel; scanning = false
+            status = if (ips.isEmpty()) "Não achei o app do Box. Instalou e ligou o receptor?" else "Achei ${ips.size}. Toque pra conectar."
         }
     }
     fun doScan() {
         scanning = true; found = emptyList(); status = "Procurando TV Box (ADB) na rede..."
         scope.launch {
-            val list = NetworkScanner.scan(); found = list; scanning = false
-            status = if (list.isEmpty()) "Nenhum TV Box com ADB encontrado." else "Encontrei ${list.size}. Toque pra conectar."
+            val ips = NetworkScanner.scan(); found = ips.map { it to "" }; scanning = false
+            status = if (ips.isEmpty()) "Nenhum TV Box com ADB encontrado." else "Encontrei ${ips.size}. Toque pra conectar."
         }
+    }
+    fun activateDevice(d: SavedDevice) {
+        DeviceStore.setActive(prefs, d.id); activeId = d.id; boxIp = d.ip
+        if (d.type == "lg") {
+            device = "lg"; lg.useHost(d.ip); lgIp = d.ip; if (d.mac.isNotBlank()) lgMac = d.mac
+            status = "Ativo: ${d.name}"
+        } else {
+            device = "box"; boxMode = d.mode
+            if (d.mode == "receiver") {
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { Remote.boxReceiver.setHost(d.ip); Remote.boxReceiver.fetchSize() }
+                        status = "Ativo: ${d.name} ✅"
+                    } catch (e: Exception) { status = "Ativo: ${d.name} (sem resposta — ligue o receptor)" }
+                }
+            } else connectBox(d.ip)
+        }
+    }
+    fun saveCurrentDevice(name: String) {
+        if (name.isBlank()) return
+        val d = SavedDevice(
+            id = DeviceStore.newId(), name = name.trim(),
+            type = if (device == "lg") "lg" else "box",
+            mode = if (device == "lg") "lg" else boxMode,
+            ip = (if (device == "lg") lgIp else boxIp).trim(),
+            mac = if (device == "lg") lgMac.trim() else ""
+        )
+        devices = devices.filterNot { it.ip == d.ip && it.type == d.type } + d
+        DeviceStore.save(prefs, devices); DeviceStore.setActive(prefs, d.id); activeId = d.id
+        status = "Aparelho '${d.name}' salvo."
+    }
+    fun deleteDevice(d: SavedDevice) {
+        devices = devices.filterNot { it.id == d.id }; DeviceStore.save(prefs, devices)
+        if (activeId == d.id) activeId = null
     }
     fun lgScan() {
         status = "Procurando TV LG na rede..."
@@ -420,21 +462,50 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         )
     }
 
+    if (showSaveDevice) {
+        AlertDialog(
+            onDismissRequest = { showSaveDevice = false },
+            title = { Text("Salvar aparelho") },
+            text = {
+                Column {
+                    Text("Dê um nome pra este aparelho (ex: TV Box sala, Projetor, TV LG quarto)", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = newDevName, onValueChange = { newDevName = it }, label = { Text("Nome") }, singleLine = true)
+                }
+            },
+            confirmButton = { TextButton(enabled = newDevName.isNotBlank(), onClick = { saveCurrentDevice(newDevName); newDevName = ""; showSaveDevice = false }) { Text("Salvar") } },
+            dismissButton = { TextButton(onClick = { showSaveDevice = false }) { Text("Cancelar") } }
+        )
+    }
+
     val tabs = listOf("🎮" to "Controle", "🖱️" to "Mouse", "📺" to "Apps", "🎬" to "Cast", "🔌" to "Conexão")
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Top bar com seletor de aparelho sempre visível
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Controle TV", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Controle TV", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            if (devices.isNotEmpty()) {
+                // troca rápida entre aparelhos salvos
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    devices.forEach { d ->
+                        FilterChip(
+                            selected = activeId == d.id,
+                            onClick = { activateDevice(d) },
+                            label = { Text("${if (d.type == "lg") "📺" else "📦"} ${d.name}") }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                }
+            } else {
                 Row {
                     FilterChip(selected = device == "box", onClick = { device = "box"; prefs.edit().putString("device", "box").apply() }, label = { Text("📦 Box") })
                     Spacer(Modifier.width(8.dp))
                     FilterChip(selected = device == "lg", onClick = { device = "lg"; prefs.edit().putString("device", "lg").apply() }, label = { Text("📺 LG") })
                 }
             }
-            Spacer(Modifier.height(2.dp))
-            Text("Controlando: ${if (device == "lg") "TV LG" else "TV Box"} · $status", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Divider(color = MaterialTheme.colorScheme.surfaceVariant)
 
@@ -459,6 +530,8 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                     onMirrorApp = { boxAction("Abrindo AirScreen na TV...") { Remote.launchApp("com.ionitech.airscreen") } }
                 )
                 else -> ConexaoTab(
+                    devices = devices, activeId = activeId, onActivate = { activateDevice(it) }, onDelete = { deleteDevice(it) },
+                    onSaveCurrent = { newDevName = ""; showSaveDevice = true },
                     device = device, onDevice = { device = it; prefs.edit().putString("device", it).apply() },
                     boxMode = boxMode, onBoxMode = { boxMode = it; found = emptyList() },
                     boxIp = boxIp, onBoxIp = { boxIp = it }, scanning = scanning,
@@ -528,6 +601,12 @@ private fun ControlTab(device: String, act: (RemoteAction) -> Unit, onLgInput: (
             OutlinedButton(onClick = { act(RemoteAction.PLAY_PAUSE) }) { Text("⏯  Play/Pause") }
             OutlinedButton(onClick = onKeyboard) { Text("⌨️ Teclado") }
             if (device == "lg") OutlinedButton(onClick = onLgInput) { Text("🔀 Entrada") }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HoldKey("CH −", modifier = Modifier.width(100.dp)) { act(RemoteAction.CHANNEL_DOWN) }
+            Text("Canal", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HoldKey("CH +", modifier = Modifier.width(100.dp)) { act(RemoteAction.CHANNEL_UP) }
         }
     }
 }
@@ -628,7 +707,7 @@ private fun CastTab(
         Button(onClick = onSendText, enabled = typed.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Enviar texto") }
 
         Spacer(Modifier.height(18.dp)); Text("📲 Espelhar tela", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(4.dp))
-        Text("1) Liga o receptor de tela no Box (AirScreen) → 2) abre o Smart View e escolhe o Box.", style = MaterialTheme.typography.bodySmall)
+        Text("1) Liga o receptor de tela no Box (AirScreen) → 2) abre o Smart View e escolhe o Box. (Espelhamento instantâneo num toque: em breve.)", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(8.dp))
         Button(onClick = onMirrorApp, modifier = Modifier.fillMaxWidth()) { Text("1) Ligar AirScreen na TV") }
         Spacer(Modifier.height(6.dp))
@@ -638,15 +717,37 @@ private fun CastTab(
 
 @Composable
 private fun ConexaoTab(
+    devices: List<SavedDevice>, activeId: String?, onActivate: (SavedDevice) -> Unit, onDelete: (SavedDevice) -> Unit, onSaveCurrent: () -> Unit,
     device: String, onDevice: (String) -> Unit,
     boxMode: String, onBoxMode: (String) -> Unit,
     boxIp: String, onBoxIp: (String) -> Unit, scanning: Boolean,
-    onConnectBox: () -> Unit, onScanBox: () -> Unit, found: List<String>, onPick: (String) -> Unit,
+    onConnectBox: () -> Unit, onScanBox: () -> Unit, found: List<Pair<String, String>>, onPick: (String) -> Unit,
     lgIp: String, onLgIp: (String) -> Unit, lgPin: String, onLgPin: (String) -> Unit, lgMac: String, onLgMac: (String) -> Unit,
     lgFound: List<String>, onLgShowKey: () -> Unit, onLgPair: () -> Unit, onLgScan: () -> Unit, onLgPick: (String) -> Unit, onWake: () -> Unit,
     onFloating: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        // Aparelhos salvos
+        if (devices.isNotEmpty()) {
+            Text("Meus aparelhos", fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            devices.forEach { d ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = { onActivate(d) },
+                        modifier = Modifier.weight(1f),
+                        colors = if (activeId == d.id) androidx.compose.material3.ButtonDefaults.buttonColors()
+                        else androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ) { Text("${if (d.type == "lg") "📺" else "📦"} ${d.name}${if (activeId == d.id) "  • ativo" else ""}") }
+                    Spacer(Modifier.width(6.dp))
+                    OutlinedButton(onClick = { onDelete(d) }) { Text("✕") }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+            Spacer(Modifier.height(10.dp)); Divider(); Spacer(Modifier.height(12.dp))
+        }
+        Text("Adicionar / conectar", fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             FilterChip(selected = device == "box", onClick = { onDevice("box") }, label = { Text("📦 TV Box") })
             FilterChip(selected = device == "lg", onClick = { onDevice("lg") }, label = { Text("📺 TV LG") })
@@ -663,7 +764,12 @@ private fun ConexaoTab(
             Button(onClick = onConnectBox, enabled = boxIp.isNotBlank() && !scanning, modifier = Modifier.fillMaxWidth()) { Text(if (boxMode == "receiver") "Conectar (app do Box)" else "Conectar (ADB)") }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = onScanBox, enabled = !scanning, modifier = Modifier.fillMaxWidth()) { Text(if (scanning) "Procurando..." else "🔍 Procurar Box na rede") }
-            found.forEach { dev -> Spacer(Modifier.height(6.dp)); OutlinedButton(onClick = { onPick(dev) }, modifier = Modifier.fillMaxWidth()) { Text("📺  $dev") } }
+            found.forEach { (ip, model) ->
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = { onPick(ip) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("📺  $ip" + if (model.isNotBlank()) "  —  $model" else "")
+                }
+            }
             Spacer(Modifier.height(6.dp))
             Text(if (boxMode == "receiver") "Instale o app 'Controle TV (Receptor)' no Box e ligue a acessibilidade." else "ADB precisa do 'ADB pela rede' ligado (porta 5555).", style = MaterialTheme.typography.bodySmall)
         } else {
@@ -682,6 +788,9 @@ private fun ConexaoTab(
             Spacer(Modifier.height(6.dp))
             OutlinedButton(onClick = onWake, enabled = lgMac.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("⚡ Ligar TV (Wake-on-LAN)") }
         }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onSaveCurrent, modifier = Modifier.fillMaxWidth()) { Text("💾 Salvar este aparelho (dar um nome)") }
+
         Spacer(Modifier.height(18.dp)); Divider(); Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onFloating, modifier = Modifier.fillMaxWidth()) { Text("🫧 Controle flutuante (continua na tela ao sair)") }
     }
