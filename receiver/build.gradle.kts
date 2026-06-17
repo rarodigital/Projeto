@@ -11,8 +11,8 @@ android {
         applicationId = "com.raro.controletv.receiver"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     buildTypes {
@@ -31,6 +31,7 @@ android {
 }
 
 dependencies {
+    // (receiver é app só de Views, sem Compose)
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

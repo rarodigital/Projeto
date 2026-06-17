@@ -222,9 +222,13 @@ class ReceiverService : Service() {
         var u = url.trim()
         if (!u.contains("://")) u = "https://$u"
         return try {
-            startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+            val open = Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // força abrir no navegador (nova aba), não num app aleatório
+            val probe = Intent(Intent.ACTION_VIEW, Uri.parse("http://example.com"))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+            val browser = packageManager.resolveActivity(probe, 0)?.activityInfo?.packageName
+            if (browser != null && browser != "android") open.setPackage(browser)
+            startActivity(open)
             "ok"
         } catch (e: Exception) { "fail: ${e.message}" }
     }

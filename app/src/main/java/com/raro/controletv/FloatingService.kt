@@ -183,12 +183,15 @@ class FloatingService : Service() {
         text = label
         isAllCaps = false
         minWidth = 0
-        minimumWidth = 0
-        setPadding(dp(10), dp(4), dp(10), dp(4))
+        minimumWidth = dp(56)
+        minHeight = dp(48)
+        minimumHeight = dp(48)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        setPadding(dp(14), dp(10), dp(14), dp(10))
         val lp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) }
+        ).apply { setMargins(dp(6), dp(6), dp(6), dp(6)) }
         layoutParams = lp
         setOnClickListener { onClick() }
     }

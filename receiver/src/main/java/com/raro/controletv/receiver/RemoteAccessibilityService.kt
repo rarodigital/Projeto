@@ -2,10 +2,12 @@ package com.raro.controletv.receiver
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -137,15 +139,8 @@ class RemoteAccessibilityService : AccessibilityService() {
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val (w, h) = screenSize()
         cx = w / 2f; cy = h / 2f
-        cursorSize = (28 * resources.displayMetrics.density).toInt()
-        val v = View(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.WHITE)
-                setStroke(maxOf(3, cursorSize / 10), Color.parseColor("#1565C0"))
-            }
-            alpha = 0.9f
-        }
+        cursorSize = (40 * resources.displayMetrics.density).toInt()
+        val v = CursorView(this)  // setinha de mouse (tip no canto superior-esquerdo)
         val lp = WindowManager.LayoutParams(
             cursorSize, cursorSize,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -155,8 +150,8 @@ class RemoteAccessibilityService : AccessibilityService() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = android.view.Gravity.TOP or android.view.Gravity.START
-            x = (cx - cursorSize / 2).toInt()
-            y = (cy - cursorSize / 2).toInt()
+            x = cx.toInt()   // a ponta da setinha fica em (cx, cy)
+            y = cy.toInt()
         }
         try { wm.addView(v, lp); cursor = v; cursorLp = lp } catch (_: Exception) {}
     }
@@ -175,8 +170,8 @@ class RemoteAccessibilityService : AccessibilityService() {
         cx = (cx + dx).coerceIn(0f, w - 1f)
         cy = (cy + dy).coerceIn(0f, h - 1f)
         val lp = cursorLp ?: return@post
-        lp.x = (cx - cursorSize / 2).toInt()
-        lp.y = (cy - cursorSize / 2).toInt()
+        lp.x = cx.toInt()
+        lp.y = cy.toInt()
         try { (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(cursor, lp) } catch (_: Exception) {}
     }
 
@@ -217,5 +212,37 @@ class RemoteAccessibilityService : AccessibilityService() {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+}
+
+/** Desenha uma setinha de mouse (ponta no canto superior-esquerdo = posição do cursor). */
+private class CursorView(context: Context) : View(context) {
+    private val fill = Paint().apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val stroke = Paint().apply {
+        color = Color.parseColor("#111111")
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        isAntiAlias = true
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val p = Path().apply {
+            moveTo(0f, 0f)
+            lineTo(0f, h * 0.74f)
+            lineTo(w * 0.22f, h * 0.57f)
+            lineTo(w * 0.38f, h * 0.92f)
+            lineTo(w * 0.52f, h * 0.85f)
+            lineTo(w * 0.36f, h * 0.51f)
+            lineTo(w * 0.62f, h * 0.49f)
+            close()
+        }
+        canvas.drawPath(p, fill)
+        canvas.drawPath(p, stroke)
     }
 }

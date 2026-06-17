@@ -9,19 +9,19 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,36 +37,56 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dadb.AdbKeyPair
 import java.io.File
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private val DarkColors = darkColorScheme(
+    primary = Color(0xFF6C8CFF),
+    onPrimary = Color(0xFF06122E),
+    secondary = Color(0xFF00D6B2),
+    onSecondary = Color(0xFF00201A),
+    background = Color(0xFF0E1014),
+    onBackground = Color(0xFFE7EAF0),
+    surface = Color(0xFF171A21),
+    onSurface = Color(0xFFE7EAF0),
+    surfaceVariant = Color(0xFF222732),
+    onSurfaceVariant = Color(0xFFC2C8D4)
+)
+
 class MainActivity : ComponentActivity() {
-    // Conexão compartilhada com o controle flutuante (Remote).
     private val box = Remote.box
     private val lg = Remote.lg
 
@@ -74,7 +94,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("ctv", Context.MODE_PRIVATE)
         setContent {
-            MaterialTheme {
+            MaterialTheme(colorScheme = DarkColors) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     RemoteScreen(box, lg, prefs)
                 }
@@ -83,39 +103,96 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/**
- * Botão que dispara a ação UMA vez ao tocar e, se você SEGURAR, repete sozinho
- * (ótimo pra volume e setas). Visual próprio pra controlar o gesto sem brigar com o ripple.
- */
+/** Botão circular/arredondado: dispara ao tocar e, se segurar, repete. Anima ao apertar. */
 @Composable
 fun HoldKey(
     label: String,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(12.dp),
+    shape: Shape = RoundedCornerShape(14.dp),
+    container: Color = MaterialTheme.colorScheme.primary,
+    content: Color = MaterialTheme.colorScheme.onPrimary,
+    fontSize: Int = 18,
     onPress: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (pressed) 0.86f else 1f, label = "press")
     Surface(
         shape = shape,
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        modifier = modifier.pointerInput(Unit) {
-            awaitEachGesture {
-                awaitFirstDown()
-                onPress()                       // dispara já no toque
-                val job = scope.launch {
-                    delay(450)                  // segurou? começa a repetir
-                    while (isActive) { onPress(); delay(110) }
+        color = container,
+        contentColor = content,
+        modifier = modifier
+            .scale(scale)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown()
+                    pressed = true
+                    onPress()
+                    val job = scope.launch { delay(450); while (isActive) { onPress(); delay(110) } }
+                    waitForUpOrCancellation()
+                    job.cancel()
+                    pressed = false
                 }
-                waitForUpOrCancellation()       // soltou
-                job.cancel()
             }
-        }
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(vertical = 14.dp)) {
-            Text(label, style = MaterialTheme.typography.titleMedium)
+            Text(label, fontSize = fontSize.sp, fontWeight = FontWeight.SemiBold)
         }
     }
+}
+
+/** Touchpad: 1 dedo move o cursor / toque clica / 2 dedos rolam. */
+@Composable
+fun Trackpad(
+    modifier: Modifier = Modifier,
+    sens: Float = 2.4f,
+    onMove: (Int, Int) -> Unit,
+    onScroll: (Int) -> Unit,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                var maxP = 1; var moved = 0f
+                var accX = 0f; var accY = 0f; var accS = 0f; var last = 0L
+                while (true) {
+                    val e = awaitPointerEvent()
+                    val pr = e.changes.filter { it.pressed }
+                    if (pr.isEmpty()) break
+                    if (pr.size > maxP) maxP = pr.size
+                    if (pr.size >= 2) {
+                        val dy = pr.map { it.position.y - it.previousPosition.y }.average().toFloat()
+                        accS += dy; pr.forEach { it.consume() }
+                        if (abs(accS) > 70f) { onScroll(if (accS > 0) 1 else -1); accS = 0f }
+                    } else {
+                        val c = pr[0]
+                        val dx = c.position.x - c.previousPosition.x
+                        val dy = c.position.y - c.previousPosition.y
+                        moved += abs(dx) + abs(dy); accX += dx; accY += dy; c.consume()
+                        val now = System.currentTimeMillis()
+                        if (now - last > 45) { onMove((accX * sens).toInt(), (accY * sens).toInt()); accX = 0f; accY = 0f; last = now }
+                    }
+                }
+                if (maxP == 1 && moved < 16f) onClick()
+                else if (maxP == 1 && (accX != 0f || accY != 0f)) onMove((accX * sens).toInt(), (accY * sens).toInt())
+            }
+        }
+    )
+}
+
+/** Barra de rolagem lateral (igual a da LG): arrasta pra cima/baixo. */
+@Composable
+fun ScrollStrip(modifier: Modifier = Modifier, onScroll: (Int) -> Unit) {
+    Box(
+        modifier = modifier.pointerInput(Unit) {
+            var acc = 0f
+            detectVerticalDragGestures(onDragEnd = { acc = 0f }) { change, d ->
+                change.consume(); acc += d
+                if (abs(acc) > 55f) { onScroll(if (acc > 0) 1 else -1); acc = 0f }
+            }
+        }
+    )
 }
 
 @Composable
@@ -123,174 +200,125 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    // Chave ADB persistente: a TV lembra a autorização e não pede toda vez.
     val keyPair = remember {
         try {
             val priv = File(ctx.filesDir, "adbkey")
             val pub = File(ctx.filesDir, "adbkey.pub")
             if (!priv.exists() || !pub.exists()) AdbKeyPair.generate(priv, pub)
             AdbKeyPair.read(priv, pub)
-        } catch (e: Exception) {
-            null
-        }
+        } catch (e: Exception) { null }
     }
 
+    var tab by remember { mutableStateOf(0) }
     var device by remember { mutableStateOf(prefs.getString("device", "box") ?: "box") }
-    var status by remember { mutableStateOf("Escolha o aparelho e conecte.") }
+    var status by remember { mutableStateOf("Conecte um aparelho na aba Conexão.") }
 
-    // TV Box
     var boxIp by remember { mutableStateOf(prefs.getString("ip", "") ?: "") }
     var boxMode by remember { mutableStateOf(prefs.getString("boxmode", "receiver") ?: "receiver") }
     var scanning by remember { mutableStateOf(false) }
     var found by remember { mutableStateOf(listOf<String>()) }
 
-    // TV LG
     var lgIp by remember { mutableStateOf(prefs.getString("lg_ip", "") ?: "") }
     var lgPin by remember { mutableStateOf("") }
     var lgMac by remember { mutableStateOf(prefs.getString("lg_mac", "") ?: "") }
     var lgFound by remember { mutableStateOf(listOf<String>()) }
 
-    // Atalhos / apps do TV Box (nome, pacote)
     var apps by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var loadingApps by remember { mutableStateOf(false) }
-
-    // Teclado
     var typed by remember { mutableStateOf("") }
-
-    // Play on TV / busca
     var castUrl by remember { mutableStateOf("") }
     var ytQuery by remember { mutableStateOf("") }
 
-    // Resolução da tela do Box (pra mapear o mouse/touchpad)
-    var boxScreen by remember { mutableStateOf(0 to 0) }
-
-    // Atalhos fixados (nome bonito -> pacote)
     fun loadFavs(): List<Pair<String, String>> =
-        (prefs.getString("favs", "") ?: "")
-            .split("\n")
-            .filter { it.contains("\t") }
-            .map { val p = it.split("\t"); p[0] to p.getOrElse(1) { "" } }
-            .filter { it.second.isNotBlank() }
+        (prefs.getString("favs", "") ?: "").split("\n").filter { it.contains("\t") }
+            .map { val p = it.split("\t"); p[0] to p.getOrElse(1) { "" } }.filter { it.second.isNotBlank() }
     var favs by remember { mutableStateOf(loadFavs()) }
     fun saveFavs(list: List<Pair<String, String>>) {
         favs = list
         prefs.edit().putString("favs", list.joinToString("\n") { "${it.first}\t${it.second}" }).apply()
     }
-    // Diálogo de fixar app (pedir nome bonito)
     var pinPkg by remember { mutableStateOf<String?>(null) }
     var pinName by remember { mutableStateOf("") }
 
     fun act(action: RemoteAction) {
         try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Exception) {}
         scope.launch {
-            try {
-                withContext(Dispatchers.IO) { Remote.send(action) }
-            } catch (e: Exception) {
-                status = "Erro: ${e.message}"
-            }
+            try { withContext(Dispatchers.IO) { Remote.send(action) } }
+            catch (e: Exception) { status = "Erro: ${e.message}" }
         }
     }
+    fun io(block: () -> Unit) { scope.launch { try { withContext(Dispatchers.IO) { block() } } catch (_: Exception) {} } }
 
     fun connectBox(target: String) {
         if (target.isBlank()) return
-        boxIp = target
-        status = "Conectando a $target..."
+        boxIp = target; status = "Conectando a $target..."
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { box.connect(target.trim(), keyPair = keyPair) }
-                boxScreen = withContext(Dispatchers.IO) { box.screenSize() }
                 prefs.edit().putString("ip", target.trim()).apply()
                 status = "TV Box conectado (${box.host})"
-            } catch (e: Exception) {
-                status = "Falha: ${e.message}"
-            }
+            } catch (e: Exception) { status = "Falha: ${e.message}" }
         }
     }
-
-    // Conecta pelo app instalado no Box (sem ADB).
     fun connectReceiver(target: String) {
         if (target.isBlank()) return
-        boxIp = target
-        status = "Conectando ao app do Box em $target..."
+        boxIp = target; status = "Conectando ao app do Box em $target..."
         scope.launch {
             try {
                 val acc = withContext(Dispatchers.IO) {
-                    Remote.boxReceiver.connect(target.trim())
-                    Remote.boxReceiver.fetchSize()
-                    Remote.boxReceiver.accessibilityReady()
+                    Remote.boxReceiver.connect(target.trim()); Remote.boxReceiver.fetchSize(); Remote.boxReceiver.accessibilityReady()
                 }
-                boxScreen = Remote.boxReceiver.screenW to Remote.boxReceiver.screenH
                 prefs.edit().putString("ip", target.trim()).apply()
-                status = if (acc) "Box conectado pelo app ✅"
-                else "Conectado, mas LIGUE a acessibilidade no app do Box (setas/OK não vão sem ela)."
-            } catch (e: Exception) {
-                status = "Não achei o app do Box: ${e.message}. Instalou e ligou o receptor no Box?"
-            }
+                status = if (acc) "Box conectado pelo app ✅" else "Conectado, mas LIGUE a acessibilidade no app do Box."
+            } catch (e: Exception) { status = "Não achei o app do Box: ${e.message}" }
         }
     }
-
     fun scanReceiver() {
-        scanning = true
-        found = emptyList()
-        status = "Procurando o Box (app receptor) na rede..."
+        scanning = true; found = emptyList(); status = "Procurando o Box na rede..."
         scope.launch {
             val list = withContext(Dispatchers.IO) { NetworkScanner.scan(port = BoxReceiverController.PORT) }
-            found = list
-            scanning = false
-            status = if (list.isEmpty())
-                "Não achei o app do Box. Instalou e ligou o receptor no TV Box?"
-            else "Achei ${list.size}. Toque pra conectar."
+            found = list; scanning = false
+            status = if (list.isEmpty()) "Não achei o app do Box. Instalou e ligou o receptor?" else "Achei ${list.size}. Toque pra conectar."
         }
     }
-
+    fun doScan() {
+        scanning = true; found = emptyList(); status = "Procurando TV Box (ADB) na rede..."
+        scope.launch {
+            val list = NetworkScanner.scan(); found = list; scanning = false
+            status = if (list.isEmpty()) "Nenhum TV Box com ADB encontrado." else "Encontrei ${list.size}. Toque pra conectar."
+        }
+    }
     fun lgScan() {
         status = "Procurando TV LG na rede..."
         scope.launch {
             val list = withContext(Dispatchers.IO) { NetworkScanner.scan(port = 8080) }
             lgFound = list
-            status = if (list.isEmpty())
-                "Nenhuma TV LG encontrada (ela precisa estar ligada e na rede)."
-            else "Encontrei ${list.size}. Toque pra usar como IP da LG."
+            status = if (list.isEmpty()) "Nenhuma TV LG encontrada (ligue a TV)." else "Encontrei ${list.size}. Toque pra usar."
         }
     }
-
     fun wakeLg() {
-        if (lgMac.isBlank()) { status = "Digite o MAC da TV LG pra ligar."; return }
-        status = "Enviando sinal pra ligar a TV..."
+        if (lgMac.isBlank()) { status = "Digite o MAC da TV LG."; return }
+        status = "Enviando sinal pra ligar..."
         scope.launch {
-            try {
-                withContext(Dispatchers.IO) { WakeOnLan.send(lgMac.trim()) }
-                prefs.edit().putString("lg_mac", lgMac.trim()).apply()
-                status = "Sinal enviado. Se a TV suportar, vai ligar."
-            } catch (e: Exception) {
-                status = "Falha ao enviar: ${e.message}"
-            }
+            try { withContext(Dispatchers.IO) { WakeOnLan.send(lgMac.trim()) }; prefs.edit().putString("lg_mac", lgMac.trim()).apply(); status = "Sinal enviado." }
+            catch (e: Exception) { status = "Falha: ${e.message}" }
         }
     }
-
-    fun doScan() {
-        scanning = true
-        found = emptyList()
-        status = "Procurando TV Box na rede..."
+    fun lgShowKey() {
+        if (lgIp.isBlank()) { status = "Digite o IP da TV LG."; return }
+        status = "Pedindo o PIN na TV..."
         scope.launch {
-            val list = NetworkScanner.scan()
-            found = list
-            scanning = false
-            status = if (list.isEmpty())
-                "Nenhum TV Box com ADB encontrado. Ligue a Depuração ADB no Box."
-            else "Encontrei ${list.size}. Toque no IP pra conectar."
+            try { withContext(Dispatchers.IO) { lg.requestPairingKey(lgIp.trim()) }; prefs.edit().putString("lg_ip", lgIp.trim()).apply(); status = "Veja o PIN na TV e digite abaixo." }
+            catch (e: Exception) { status = "Falha ao falar com a TV: ${e.message}" }
         }
     }
-
-    fun boxOp(label: String, op: () -> Unit) {
-        status = label
+    fun lgPair() {
+        status = "Pareando..."
         scope.launch {
-            try { withContext(Dispatchers.IO) { op() } }
-            catch (e: Exception) { status = "Erro: ${e.message}" }
+            try { withContext(Dispatchers.IO) { lg.pair(lgIp.trim(), lgPin.trim()) }; status = "TV LG pareada ✅" }
+            catch (e: Exception) { status = "Falha no pareamento: ${e.message}" }
         }
     }
-
-    // Como boxOp, mas mostra o resultado (ok / não encontrado / erro) que a TV devolveu.
     fun boxAction(label: String, op: () -> String) {
         status = label
         scope.launch {
@@ -303,115 +331,50 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             }
         }
     }
-
     fun loadApps() {
-        loadingApps = true
-        status = "Listando apps do TV Box..."
+        loadingApps = true; status = "Listando apps..."
         scope.launch {
-            try {
-                apps = withContext(Dispatchers.IO) { Remote.listApps() }
-                status = "Apps: ${apps.size}. Toque pra abrir ou ⭐ pra fixar."
-            } catch (e: Exception) {
-                status = "Erro ao listar apps: ${e.message}"
-            }
+            try { apps = withContext(Dispatchers.IO) { Remote.listApps() }; status = "Apps: ${apps.size}." }
+            catch (e: Exception) { status = "Erro ao listar: ${e.message}" }
             loadingApps = false
         }
     }
-
-    fun lgShowKey() {
-        if (lgIp.isBlank()) { status = "Digite o IP da TV LG."; return }
-        status = "Pedindo o PIN na TV..."
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) { lg.requestPairingKey(lgIp.trim()) }
-                prefs.edit().putString("lg_ip", lgIp.trim()).apply()
-                status = "Veja o PIN na tela da TV e digite abaixo."
-            } catch (e: Exception) {
-                status = "Falha ao falar com a TV: ${e.message}"
-            }
-        }
-    }
-
-    fun lgPair() {
-        status = "Pareando com a TV LG..."
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) { lg.pair(lgIp.trim(), lgPin.trim()) }
-                status = "TV LG pareada (${lg.host})"
-            } catch (e: Exception) {
-                status = "Falha no pareamento: ${e.message}"
-            }
-        }
-    }
-
-    fun sendText() {
-        if (typed.isBlank()) return
-        val t = typed
-        boxAction("Digitando na TV...") { Remote.boxText(t) }
-    }
-
-    fun castOpen() {
-        if (castUrl.isBlank()) return
-        val u = castUrl
-        boxAction("Abrindo na TV...") { Remote.openUrl(u) }
-    }
-
-    fun ytSearch() {
-        if (ytQuery.isBlank()) return
-        val q = ytQuery
-        boxAction("Buscando \"$q\" na TV...") { Remote.youtubeSearch(q) }
-    }
-
-    fun lgInput() = boxOp("Trocando entrada da TV...") { lg.switchInput() }
-
-    // Espelhamento: o app abre a tela de "Transmitir tela" do PRÓPRIO Android.
-    // Não dá pra espelhar de dentro do app — quem espelha é o sistema (Miracast/Smart View),
-    // e a TV/Box precisa suportar e estar com o Miracast ligado.
-    fun openCastPanel() {
-        try {
-            ctx.startActivity(
-                Intent("android.settings.CAST_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-            status = "Escolha a TV/Box na lista pra espelhar (precisa ter Miracast ligado na TV)."
-        } catch (e: Exception) {
-            status = "Seu Android não abriu a tela de espelhar: ${e.message}"
-        }
-    }
-
-    // Liga o controle flutuante (bolha por cima dos outros apps).
     fun enableFloating() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(ctx)) {
             status = "Permita 'desenhar sobre outros apps' e toque de novo."
-            try {
-                ctx.startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:${ctx.packageName}")
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            } catch (_: Exception) {}
+            try { ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
             return
         }
         val i = Intent(ctx, FloatingService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i)
-        else ctx.startService(i)
-        status = "Controle flutuante ligado. Pode sair do app — a bolha fica na tela."
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
+        status = "Controle flutuante ligado."
     }
-
-    // Reconecta sozinho no último TV Box ao abrir o app.
-    LaunchedEffect(Unit) {
-        if (device == "box" && boxIp.isNotBlank()) {
-            if (boxMode == "receiver") connectReceiver(boxIp) else connectBox(boxIp)
+    fun openCastPanel() {
+        // tenta o Smart View da Samsung primeiro (é o que acha o Box pra ele), depois o painel padrão
+        val attempts = listOf(
+            Intent().setComponent(android.content.ComponentName("com.samsung.android.smartmirroring", "com.samsung.android.smartmirroring.SmartMirroringActivity")),
+            Intent("com.samsung.android.smartmirroring.action.UNIFIED_CONNECT"),
+            Intent("android.settings.CAST_SETTINGS"),
+            Intent("android.settings.WIFI_DISPLAY_SETTINGS")
+        )
+        for (i in attempts) {
+            try {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(i)
+                status = "Abrindo espelhamento — escolha a TV/Box na lista."
+                return
+            } catch (_: Exception) {}
         }
-    }
-    // Mantém aparelho/transporte em sincronia com o controle flutuante.
-    LaunchedEffect(device) { Remote.device = device }
-    LaunchedEffect(boxMode) {
-        Remote.boxMode = boxMode
-        prefs.edit().putString("boxmode", boxMode).apply()
+        status = "Não consegui abrir; use o Smart View pela barra de notificações."
     }
 
-    // Diálogo: dar um nome bonito pro app fixado
+    LaunchedEffect(Unit) {
+        if (device == "box" && boxIp.isNotBlank()) { if (boxMode == "receiver") connectReceiver(boxIp) else connectBox(boxIp) }
+    }
+    LaunchedEffect(device) { Remote.device = device }
+    LaunchedEffect(boxMode) { Remote.boxMode = boxMode; prefs.edit().putString("boxmode", boxMode).apply() }
+
+    // Diálogo de fixar atalho
     pinPkg?.let { pkg ->
         AlertDialog(
             onDismissRequest = { pinPkg = null },
@@ -420,424 +383,265 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                 Column {
                     Text(pkg, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = pinName,
-                        onValueChange = { pinName = it },
-                        label = { Text("Nome do atalho (ex: UniTV)") },
-                        singleLine = true
-                    )
+                    OutlinedTextField(value = pinName, onValueChange = { pinName = it }, label = { Text("Nome (ex: UniTV)") }, singleLine = true)
                 }
             },
             confirmButton = {
-                TextButton(
-                    enabled = pinName.isNotBlank(),
-                    onClick = {
-                        saveFavs(favs.filterNot { it.second == pkg } + (pinName.trim() to pkg))
-                        status = "Atalho '${pinName.trim()}' fixado."
-                        pinPkg = null
-                    }
-                ) { Text("Fixar") }
+                TextButton(enabled = pinName.isNotBlank(), onClick = {
+                    saveFavs(favs.filterNot { it.second == pkg } + (pinName.trim() to pkg)); status = "Atalho fixado."; pinPkg = null
+                }) { Text("Fixar") }
             },
             dismissButton = { TextButton(onClick = { pinPkg = null }) { Text("Cancelar") } }
         )
     }
 
+    val tabs = listOf("🎮" to "Controle", "🖱️" to "Mouse", "📺" to "Apps", "🎬" to "Cast", "🔌" to "Conexão")
+
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Top bar
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Text("Controle TV", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Divider(color = MaterialTheme.colorScheme.surfaceVariant)
+
+        Crossfade(targetState = tab, label = "tab", modifier = Modifier.weight(1f)) { t ->
+            when (t) {
+                0 -> ControlTab(device, { act(it) }, { io { lg.switchInput() } })
+                1 -> MouseTab({ act(it) }, onMove = { x, y -> io { Remote.mouseMove(x, y) } }, onScroll = { d -> io { Remote.mouseScroll(d) } }, onClick = { io { Remote.mouseShow(true); Remote.mouseClick() } }, onHide = { io { Remote.mouseShow(false) } })
+                2 -> AppsTab(
+                    favs = favs, apps = apps, loadingApps = loadingApps,
+                    onYoutube = { boxAction("Abrindo YouTube...") { Remote.openUrl("https://www.youtube.com/") } },
+                    onLoadApps = { loadApps() },
+                    onLaunch = { name, pkg -> boxAction("Abrindo $name...") { Remote.launchApp(pkg) } },
+                    onPin = { name, pkg -> pinName = name; pinPkg = pkg },
+                    onUnpin = { pkg -> saveFavs(favs.filterNot { it.second == pkg }) }
+                )
+                3 -> CastTab(
+                    castUrl = castUrl, onCastUrl = { castUrl = it }, onCast = { boxAction("Abrindo na TV...") { Remote.openUrl(castUrl) } },
+                    ytQuery = ytQuery, onYt = { ytQuery = it }, onYtSearch = { boxAction("Buscando na TV...") { Remote.youtubeSearch(ytQuery) } },
+                    typed = typed, onTyped = { typed = it }, onSendText = { boxAction("Digitando...") { Remote.boxText(typed) } },
+                    onMirror = { openCastPanel() }
+                )
+                else -> ConexaoTab(
+                    device = device, onDevice = { device = it; prefs.edit().putString("device", it).apply() },
+                    boxMode = boxMode, onBoxMode = { boxMode = it; found = emptyList() },
+                    boxIp = boxIp, onBoxIp = { boxIp = it }, scanning = scanning,
+                    onConnectBox = { if (boxMode == "receiver") connectReceiver(boxIp.trim()) else connectBox(boxIp.trim()) },
+                    onScanBox = { if (boxMode == "receiver") scanReceiver() else doScan() },
+                    found = found, onPick = { if (boxMode == "receiver") connectReceiver(it) else connectBox(it) },
+                    lgIp = lgIp, onLgIp = { lgIp = it }, lgPin = lgPin, onLgPin = { lgPin = it }, lgMac = lgMac, onLgMac = { lgMac = it },
+                    lgFound = lgFound, onLgShowKey = { lgShowKey() }, onLgPair = { lgPair() }, onLgScan = { lgScan() }, onLgPick = { lgIp = it }, onWake = { wakeLg() },
+                    onFloating = { enableFloating() }
+                )
+            }
+        }
+
+        NavigationBar {
+            tabs.forEachIndexed { i, pair ->
+                NavigationBarItem(
+                    selected = tab == i,
+                    onClick = { tab = i },
+                    icon = { Text(pair.first, fontSize = 20.sp) },
+                    label = { Text(pair.second, fontSize = 11.sp) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ControlTab(device: String, act: (RemoteAction) -> Unit, onLgInput: () -> Unit) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Controle TV", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(12.dp))
-
-        // Seletor de aparelho
-        Row {
-            FilterChip(
-                selected = device == "box",
-                onClick = { device = "box"; prefs.edit().putString("device", "box").apply() },
-                label = { Text("📦 TV Box") }
-            )
-            Spacer(Modifier.width(10.dp))
-            FilterChip(
-                selected = device == "lg",
-                onClick = { device = "lg"; prefs.edit().putString("device", "lg").apply() },
-                label = { Text("📺 TV LG") }
-            )
+        // topo: Power / Home / Mudo
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            HoldKey("⏻", shape = CircleShape, container = Color(0xFF8A2B2B), content = Color.White, modifier = Modifier.size(60.dp)) { act(RemoteAction.POWER) }
+            HoldKey("⌂", shape = CircleShape, modifier = Modifier.size(60.dp)) { act(RemoteAction.HOME) }
+            HoldKey("🔇", shape = CircleShape, container = MaterialTheme.colorScheme.surfaceVariant, content = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(60.dp)) { act(RemoteAction.MUTE) }
         }
-        Spacer(Modifier.height(14.dp))
-
-        if (device == "box") {
-            Row {
-                FilterChip(
-                    selected = boxMode == "receiver",
-                    onClick = { boxMode = "receiver"; found = emptyList() },
-                    label = { Text("📲 App do Box") }
-                )
-                Spacer(Modifier.width(10.dp))
-                FilterChip(
-                    selected = boxMode == "adb",
-                    onClick = { boxMode = "adb"; found = emptyList() },
-                    label = { Text("🔌 ADB") }
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
-                value = boxIp,
-                onValueChange = { boxIp = it },
-                label = { Text("IP do TV Box (ex: 192.168.0.50)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { if (boxMode == "receiver") connectReceiver(boxIp.trim()) else connectBox(boxIp.trim()) },
-                enabled = boxIp.isNotBlank() && !scanning,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(if (boxMode == "receiver") "Conectar (app do Box)" else "Conectar (ADB)") }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { if (boxMode == "receiver") scanReceiver() else doScan() },
-                enabled = !scanning,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text(if (scanning) "Procurando..." else "🔍 Procurar Box na rede") }
-            if (found.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                found.forEach { dev ->
-                    OutlinedButton(
-                        onClick = { if (boxMode == "receiver") connectReceiver(dev) else connectBox(dev) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("📺  $dev") }
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                if (boxMode == "receiver")
-                    "Instale o app 'Controle TV (Receptor)' no TV Box e ligue a acessibilidade nele. Depois é só procurar aqui."
-                else
-                    "ADB avançado: precisa do 'ADB pela rede' ligado no Box (porta 5555).",
-                style = MaterialTheme.typography.bodySmall
-            )
-        } else {
-            OutlinedTextField(
-                value = lgIp,
-                onValueChange = { lgIp = it },
-                label = { Text("IP da TV LG (ex: 192.168.0.20)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { lgShowKey() },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("1) Mostrar PIN na TV") }
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = lgPin,
-                onValueChange = { lgPin = it },
-                label = { Text("PIN que apareceu na TV") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { lgPair() },
-                enabled = lgIp.isNotBlank() && lgPin.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("2) Parear") }
-
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { lgScan() },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("🔍 Procurar TV LG na rede") }
-            if (lgFound.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                lgFound.forEach { dev ->
-                    OutlinedButton(
-                        onClick = { lgIp = dev },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("📺  $dev") }
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = lgMac,
-                onValueChange = { lgMac = it },
-                label = { Text("MAC da TV (pra ligar): AA:BB:CC:DD:EE:FF") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(6.dp))
-            OutlinedButton(
-                onClick = { wakeLg() },
-                enabled = lgMac.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("⚡ Ligar TV (Wake-on-LAN)") }
-        }
-
-        Spacer(Modifier.height(6.dp))
-        Text(status)
+        Spacer(Modifier.height(22.dp))
+        // D-pad redondo
+        HoldKey("▲", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.UP) }
         Spacer(Modifier.height(10.dp))
-        OutlinedButton(onClick = { enableFloating() }, modifier = Modifier.fillMaxWidth()) {
-            Text("🫧 Controle flutuante (continua na tela ao sair)")
-        }
-        Spacer(Modifier.height(16.dp))
-        Divider()
-        Spacer(Modifier.height(16.dp))
-
-        // ===== Atalhos fixados (aparecem nos dois, mas só funcionam no Box) =====
-        if (device == "box" && favs.isNotEmpty()) {
-            Text("⭐ Atalhos fixados", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            favs.forEach { (name, pkg) ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = { boxAction("Abrindo $name...") { Remote.launchApp(pkg) } },
-                        modifier = Modifier.weight(1f)
-                    ) { Text(name) }
-                    Spacer(Modifier.width(6.dp))
-                    OutlinedButton(onClick = { saveFavs(favs.filterNot { it.second == pkg }) }) { Text("✕") }
-                }
-                Spacer(Modifier.height(6.dp))
-            }
-            Spacer(Modifier.height(10.dp))
-            Divider()
-            Spacer(Modifier.height(16.dp))
-        }
-
-        // ===== D-Pad redondo (vale pros dois aparelhos) — segure as setas pra repetir =====
-        HoldKey("▲", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.UP) }
-        Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            HoldKey("◀", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.LEFT) }
-            Spacer(Modifier.width(12.dp))
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                modifier = Modifier
-                    .size(76.dp)
-                    .pointerInput(Unit) { detectTapGestures { act(RemoteAction.OK) } }
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text("OK", style = MaterialTheme.typography.titleMedium)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            HoldKey("▶", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.RIGHT) }
+            HoldKey("◀", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.LEFT) }
+            Spacer(Modifier.width(14.dp))
+            HoldKey("OK", shape = CircleShape, container = MaterialTheme.colorScheme.secondary, content = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.size(84.dp)) { act(RemoteAction.OK) }
+            Spacer(Modifier.width(14.dp))
+            HoldKey("▶", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.RIGHT) }
         }
-        Spacer(Modifier.height(8.dp))
-        HoldKey("▼", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.DOWN) }
+        Spacer(Modifier.height(10.dp))
+        HoldKey("▼", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.DOWN) }
 
-        Spacer(Modifier.height(18.dp))
-        Row(horizontalArrangement = Arrangement.Center) {
+        Spacer(Modifier.height(22.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = { act(RemoteAction.BACK) }) { Text("Voltar") }
-            Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = { act(RemoteAction.HOME) }) { Text("Home") }
-            Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = { act(RemoteAction.MENU) }) { Text("Menu") }
         }
-        Spacer(Modifier.height(10.dp))
-        // Volume: segure pra repetir
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            HoldKey("Vol −", modifier = Modifier.width(96.dp)) { act(RemoteAction.VOL_DOWN) }
-            Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HoldKey("Vol −", modifier = Modifier.width(100.dp)) { act(RemoteAction.VOL_DOWN) }
             OutlinedButton(onClick = { act(RemoteAction.MUTE) }) { Text("Mudo") }
-            Spacer(Modifier.width(8.dp))
-            HoldKey("Vol +", modifier = Modifier.width(96.dp)) { act(RemoteAction.VOL_UP) }
+            HoldKey("Vol +", modifier = Modifier.width(100.dp)) { act(RemoteAction.VOL_UP) }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = { act(RemoteAction.PLAY_PAUSE) }) { Text("⏯  Play/Pause") }
+            if (device == "lg") OutlinedButton(onClick = onLgInput) { Text("🔀 Entrada") }
+        }
+    }
+}
+
+@Composable
+private fun MouseTab(act: (RemoteAction) -> Unit, onMove: (Int, Int) -> Unit, onScroll: (Int) -> Unit, onClick: () -> Unit, onHide: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        Text("Touchpad — mova o cursor; toque = clique; 2 dedos ou a barra → rolar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Trackpad(
+                modifier = Modifier.weight(1f).fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp)),
+                onMove = onMove, onScroll = onScroll, onClick = onClick
+            )
+            Spacer(Modifier.width(10.dp))
+            ScrollStrip(
+                modifier = Modifier.width(46.dp).fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp)),
+                onScroll = onScroll
+            )
         }
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.Center) {
-            OutlinedButton(onClick = { act(RemoteAction.PLAY_PAUSE) }) { Text("⏯  Play/Pause") }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = { act(RemoteAction.POWER) }) { Text("Power") }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HoldKey("Vol −", modifier = Modifier.weight(1f)) { act(RemoteAction.VOL_DOWN) }
+            Button(onClick = onClick, modifier = Modifier.weight(1f)) { Text("Clique") }
+            HoldKey("Vol +", modifier = Modifier.weight(1f)) { act(RemoteAction.VOL_UP) }
         }
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { act(RemoteAction.BACK) }, modifier = Modifier.weight(1f)) { Text("Voltar") }
+            OutlinedButton(onClick = { act(RemoteAction.HOME) }, modifier = Modifier.weight(1f)) { Text("Home") }
+            OutlinedButton(onClick = onHide, modifier = Modifier.weight(1f)) { Text("Esconder") }
+        }
+    }
+}
 
-        if (device == "lg") {
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = { lgInput() }, modifier = Modifier.fillMaxWidth()) {
-                Text("🔀 Trocar entrada / fonte (Input)")
+@Composable
+private fun AppsTab(
+    favs: List<Pair<String, String>>, apps: List<Pair<String, String>>, loadingApps: Boolean,
+    onYoutube: () -> Unit, onLoadApps: () -> Unit, onLaunch: (String, String) -> Unit,
+    onPin: (String, String) -> Unit, onUnpin: (String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = onYoutube) { Text("▶️ YouTube") }
+            OutlinedButton(onClick = onLoadApps, enabled = !loadingApps) { Text(if (loadingApps) "..." else "📋 Meus apps") }
+        }
+        if (favs.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp)); Text("⭐ Atalhos fixados", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp))
+            favs.forEach { (name, pkg) ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { onLaunch(name, pkg) }, modifier = Modifier.weight(1f)) { Text(name) }
+                    Spacer(Modifier.width(6.dp))
+                    OutlinedButton(onClick = { onUnpin(pkg) }) { Text("✕") }
+                }
+                Spacer(Modifier.height(6.dp))
             }
         }
+        if (apps.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp)); Text("Toque pra abrir, ⭐ pra fixar", style = MaterialTheme.typography.bodySmall); Spacer(Modifier.height(6.dp))
+            apps.forEach { (name, pkg) ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { onLaunch(name, pkg) }, modifier = Modifier.weight(1f)) { Text(name) }
+                    Spacer(Modifier.width(6.dp))
+                    OutlinedButton(onClick = { onPin(name, pkg) }) { Text("⭐") }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+        }
+    }
+}
 
+@Composable
+private fun CastTab(
+    castUrl: String, onCastUrl: (String) -> Unit, onCast: () -> Unit,
+    ytQuery: String, onYt: (String) -> Unit, onYtSearch: () -> Unit,
+    typed: String, onTyped: (String) -> Unit, onSendText: () -> Unit,
+    onMirror: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Text("▶️ Play on TV", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = castUrl, onValueChange = onCastUrl, label = { Text("Link pra abrir no navegador da TV") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(6.dp))
+        Button(onClick = onCast, enabled = castUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Abrir na TV") }
+
+        Spacer(Modifier.height(18.dp)); Text("🔎 Buscar no YouTube da TV", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = ytQuery, onValueChange = onYt, label = { Text("O que buscar") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(6.dp))
+        OutlinedButton(onClick = onYtSearch, enabled = ytQuery.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Buscar e jogar na TV") }
+
+        Spacer(Modifier.height(18.dp)); Text("⌨️ Teclado", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = typed, onValueChange = onTyped, label = { Text("Texto pra digitar na TV") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(6.dp))
+        Button(onClick = onSendText, enabled = typed.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Enviar texto") }
+
+        Spacer(Modifier.height(18.dp)); Text("📲 Espelhar tela", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(4.dp))
+        Text("Abre o Smart View do Android (a TV/Box precisa ter Miracast).", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onMirror, modifier = Modifier.fillMaxWidth()) { Text("📲 Espelhar (Smart View)") }
+    }
+}
+
+@Composable
+private fun ConexaoTab(
+    device: String, onDevice: (String) -> Unit,
+    boxMode: String, onBoxMode: (String) -> Unit,
+    boxIp: String, onBoxIp: (String) -> Unit, scanning: Boolean,
+    onConnectBox: () -> Unit, onScanBox: () -> Unit, found: List<String>, onPick: (String) -> Unit,
+    lgIp: String, onLgIp: (String) -> Unit, lgPin: String, onLgPin: (String) -> Unit, lgMac: String, onLgMac: (String) -> Unit,
+    lgFound: List<String>, onLgShowKey: () -> Unit, onLgPair: () -> Unit, onLgScan: () -> Unit, onLgPick: (String) -> Unit, onWake: () -> Unit,
+    onFloating: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilterChip(selected = device == "box", onClick = { onDevice("box") }, label = { Text("📦 TV Box") })
+            FilterChip(selected = device == "lg", onClick = { onDevice("lg") }, label = { Text("📺 TV LG") })
+        }
+        Spacer(Modifier.height(14.dp))
         if (device == "box") {
-            // ===== Teclado (digitar texto na TV) =====
-            Spacer(Modifier.height(18.dp))
-            Divider()
-            Spacer(Modifier.height(12.dp))
-            Text("⌨️ Teclado", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = typed,
-                onValueChange = { typed = it },
-                label = { Text("Texto pra digitar na TV") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                Button(onClick = { sendText() }, enabled = typed.isNotBlank()) { Text("Enviar") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { boxOp("Apagando...") { box.backspace() } }) { Text("⌫") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { boxOp("Enter...") { box.enter() } }) { Text("Enter") }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FilterChip(selected = boxMode == "receiver", onClick = { onBoxMode("receiver") }, label = { Text("📲 App do Box") })
+                FilterChip(selected = boxMode == "adb", onClick = { onBoxMode("adb") }, label = { Text("🔌 ADB") })
             }
-
-            // ===== Trackpad (cursor na tela da TV, igual notebook) =====
-            Spacer(Modifier.height(18.dp))
-            Divider()
-            Spacer(Modifier.height(12.dp))
-            Text("🖱️ Trackpad — deslize como no notebook; toque = clique.", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            val sens = 2.4f
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
-                    .pointerInput(Unit) {
-                        detectTapGestures {
-                            scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseShow(true); Remote.mouseClick() } } catch (_: Exception) {} }
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        var accX = 0f; var accY = 0f; var last = 0L
-                        fun flush() {
-                            val sx = accX; val sy = accY; accX = 0f; accY = 0f
-                            if (sx != 0f || sy != 0f) scope.launch {
-                                try { withContext(Dispatchers.IO) { Remote.mouseMove((sx * sens).toInt(), (sy * sens).toInt()) } } catch (_: Exception) {}
-                            }
-                        }
-                        detectDragGestures(
-                            onDragStart = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseShow(true) } } catch (_: Exception) {} } },
-                            onDragEnd = { flush() }
-                        ) { change, drag ->
-                            change.consume(); accX += drag.x; accY += drag.y
-                            val now = System.currentTimeMillis()
-                            if (now - last > 45) { last = now; flush() }
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("deslize aqui pra mover o cursor", style = MaterialTheme.typography.bodySmall)
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.Center) {
-                Button(onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseClick() } } catch (_: Exception) {} } }) { Text("🖱️ Clique") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseScroll(1) } } catch (_: Exception) {} } }) { Text("Rolar ↓") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseScroll(-1) } } catch (_: Exception) {} } }) { Text("Rolar ↑") }
-            }
-            Spacer(Modifier.height(6.dp))
-            OutlinedButton(
-                onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseShow(false) } } catch (_: Exception) {} } },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Esconder cursor") }
-
-            // ===== Play on TV / Cast =====
-            Spacer(Modifier.height(18.dp))
-            Divider()
-            Spacer(Modifier.height(12.dp))
-            Text("▶️ Play on TV / Cast", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = castUrl,
-                onValueChange = { castUrl = it },
-                label = { Text("Link pra abrir na TV (vídeo, YouTube, site)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(6.dp))
-            Button(
-                onClick = { castOpen() },
-                enabled = castUrl.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Abrir na TV") }
-
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
-                value = ytQuery,
-                onValueChange = { ytQuery = it },
-                label = { Text("Buscar no YouTube da TV") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
+            OutlinedTextField(value = boxIp, onValueChange = onBoxIp, label = { Text("IP do TV Box") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = onConnectBox, enabled = boxIp.isNotBlank() && !scanning, modifier = Modifier.fillMaxWidth()) { Text(if (boxMode == "receiver") "Conectar (app do Box)" else "Conectar (ADB)") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onScanBox, enabled = !scanning, modifier = Modifier.fillMaxWidth()) { Text(if (scanning) "Procurando..." else "🔍 Procurar Box na rede") }
+            found.forEach { dev -> Spacer(Modifier.height(6.dp)); OutlinedButton(onClick = { onPick(dev) }, modifier = Modifier.fillMaxWidth()) { Text("📺  $dev") } }
             Spacer(Modifier.height(6.dp))
-            OutlinedButton(
-                onClick = { ytSearch() },
-                enabled = ytQuery.isNotBlank(),
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("🔎 Buscar e jogar na TV") }
-
-            // ===== Espelhamento =====
-            Spacer(Modifier.height(18.dp))
-            Divider()
-            Spacer(Modifier.height(12.dp))
-            Text("📲 Espelhar tela do celular", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "O espelhamento (com áudio) é feito pelo próprio Android. Ligue o Miracast no TV Box e toque abaixo pra escolher ele na lista.",
-                style = MaterialTheme.typography.bodySmall
-            )
+            Text(if (boxMode == "receiver") "Instale o app 'Controle TV (Receptor)' no Box e ligue a acessibilidade." else "ADB precisa do 'ADB pela rede' ligado (porta 5555).", style = MaterialTheme.typography.bodySmall)
+        } else {
+            OutlinedTextField(value = lgIp, onValueChange = onLgIp, label = { Text("IP da TV LG") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = { openCastPanel() },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("📲 Espelhar tela (Smart View / Transmitir)") }
-
-            // ===== Apps do TV Box =====
-            Spacer(Modifier.height(18.dp))
-            Divider()
-            Spacer(Modifier.height(12.dp))
-            Text("Apps do TV Box", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = onLgShowKey, modifier = Modifier.fillMaxWidth()) { Text("1) Mostrar PIN na TV") }
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { boxAction("Abrindo YouTube...") { Remote.openUrl("https://www.youtube.com/") } }) { Text("YouTube") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { loadApps() }, enabled = !loadingApps) {
-                    Text(if (loadingApps) "..." else "📋 Meus apps")
-                }
-            }
-
-            if (boxMode == "adb") {
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.Center) {
-                    OutlinedButton(onClick = { boxOp("Abrindo Configurações...") { box.openSettings() } }) { Text("Config") }
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { boxOp("Limpando cache...") { box.clearCache() } }) { Text("Limpar cache") }
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { boxOp("Fechando apps...") { box.closeApps() } }) { Text("Fechar apps") }
-                }
-            }
-
-            if (apps.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Text("Toque pra abrir, ⭐ pra fixar como atalho:", style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(4.dp))
-                apps.forEach { (name, pkg) ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            onClick = { boxAction("Abrindo $name...") { Remote.launchApp(pkg) } },
-                            modifier = Modifier.weight(1f)
-                        ) { Text(name) }
-                        Spacer(Modifier.width(6.dp))
-                        OutlinedButton(onClick = { pinName = name; pinPkg = pkg }) { Text("⭐") }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
+            OutlinedTextField(value = lgPin, onValueChange = onLgPin, label = { Text("PIN da TV") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = onLgPair, enabled = lgIp.isNotBlank() && lgPin.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("2) Parear") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onLgScan, modifier = Modifier.fillMaxWidth()) { Text("🔍 Procurar TV LG") }
+            lgFound.forEach { dev -> Spacer(Modifier.height(6.dp)); OutlinedButton(onClick = { onLgPick(dev) }, modifier = Modifier.fillMaxWidth()) { Text("📺  $dev") } }
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(value = lgMac, onValueChange = onLgMac, label = { Text("MAC da TV (pra ligar)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(onClick = onWake, enabled = lgMac.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("⚡ Ligar TV (Wake-on-LAN)") }
         }
+        Spacer(Modifier.height(18.dp)); Divider(); Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = onFloating, modifier = Modifier.fillMaxWidth()) { Text("🫧 Controle flutuante (continua na tela ao sair)") }
     }
 }
