@@ -79,6 +79,35 @@ class TvBoxController {
         d.shell("input text \"$safe\"")
     }
 
+    /** Apaga 1 caractere (backspace). */
+    fun backspace() = keyevent(67)
+    /** Confirma / Enter. */
+    fun enter() = keyevent(66)
+
+    /** Toque (clique do mouse) numa coordenada absoluta da tela. */
+    fun tap(x: Int, y: Int) {
+        val d = dadb ?: throw IllegalStateException("Não conectado ao TV Box.")
+        d.shell("input tap $x $y")
+    }
+
+    /** Deslize (arrastar / rolar) entre duas coordenadas, em [ms] milissegundos. */
+    fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int = 80) {
+        val d = dadb ?: throw IllegalStateException("Não conectado ao TV Box.")
+        d.shell("input swipe $x1 $y1 $x2 $y2 $ms")
+    }
+
+    /** Resolução da tela (largura, altura). Faz cache pra não consultar toda hora. */
+    private var cachedSize: Pair<Int, Int>? = null
+    fun screenSize(): Pair<Int, Int> {
+        cachedSize?.let { return it }
+        // "Physical size: 1920x1080" (pode ter "Override size:" também — pega o último número)
+        val out = sh("wm size")
+        val m = Regex("(\\d+)x(\\d+)").findAll(out).lastOrNull()
+        val size = if (m != null) m.groupValues[1].toInt() to m.groupValues[2].toInt() else 1920 to 1080
+        cachedSize = size
+        return size
+    }
+
     private fun sh(cmd: String): String {
         val d = dadb ?: throw IllegalStateException("Não conectado ao TV Box.")
         return d.shell(cmd).allOutput
@@ -118,5 +147,6 @@ class TvBoxController {
         } catch (_: Exception) {
         }
         dadb = null
+        cachedSize = null
     }
 }

@@ -5,7 +5,14 @@ import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,9 +20,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
@@ -24,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,13 +45,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import dadb.AdbKeyPair
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -56,6 +72,41 @@ class MainActivity : ComponentActivity() {
                     RemoteScreen(box, lg, prefs)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Botão que dispara a ação UMA vez ao tocar e, se você SEGURAR, repete sozinho
+ * (ótimo pra volume e setas). Visual próprio pra controlar o gesto sem brigar com o ripple.
+ */
+@Composable
+fun HoldKey(
+    label: String,
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(12.dp),
+    onPress: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    Surface(
+        shape = shape,
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        modifier = modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown()
+                onPress()                       // dispara já no toque
+                val job = scope.launch {
+                    delay(450)                  // segurou? começa a repetir
+                    while (isActive) { onPress(); delay(110) }
+                }
+                waitForUpOrCancellation()       // soltou
+                job.cancel()
+            }
+        }
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(vertical = 14.dp)) {
+            Text(label, style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -94,6 +145,25 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     // Atalhos / apps do TV Box
     var apps by remember { mutableStateOf(listOf<String>()) }
     var loadingApps by remember { mutableStateOf(false) }
+
+    // Teclado
+    var typed by remember { mutableStateOf("") }
+
+    // Atalhos fixados (nome bonito -> pacote)
+    fun loadFavs(): List<Pair<String, String>> =
+        (prefs.getString("favs", "") ?: "")
+            .split("\n")
+            .filter { it.contains("\t") }
+            .map { val p = it.split("\t"); p[0] to p.getOrElse(1) { "" } }
+            .filter { it.second.isNotBlank() }
+    var favs by remember { mutableStateOf(loadFavs()) }
+    fun saveFavs(list: List<Pair<String, String>>) {
+        favs = list
+        prefs.edit().putString("favs", list.joinToString("\n") { "${it.first}\t${it.second}" }).apply()
+    }
+    // Diálogo de fixar app (pedir nome bonito)
+    var pinPkg by remember { mutableStateOf<String?>(null) }
+    var pinName by remember { mutableStateOf("") }
 
     fun act(action: RemoteAction) {
         try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Exception) {}
@@ -170,13 +240,29 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         }
     }
 
+    // Touchpad: arrasta pra rolar a tela do Box (um swipe a partir do centro).
+    fun boxScroll(dx: Float, dy: Float) {
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val (w, h) = box.screenSize()
+                    val cx = w / 2
+                    val cy = h / 2
+                    val nx = (cx + dx).toInt().coerceIn(0, w - 1)
+                    val ny = (cy + dy).toInt().coerceIn(0, h - 1)
+                    box.swipe(cx, cy, nx, ny, 120)
+                }
+            } catch (e: Exception) { status = "Erro: ${e.message}" }
+        }
+    }
+
     fun loadApps() {
         loadingApps = true
         status = "Listando apps do TV Box..."
         scope.launch {
             try {
                 apps = withContext(Dispatchers.IO) { box.listUserApps() }
-                status = "Apps: ${apps.size}. Toque pra abrir."
+                status = "Apps: ${apps.size}. Toque pra abrir ou ⭐ pra fixar."
             } catch (e: Exception) {
                 status = "Erro ao listar apps: ${e.message}"
             }
@@ -210,9 +296,46 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         }
     }
 
+    fun sendText() {
+        if (typed.isBlank()) return
+        val t = typed
+        boxOp("Digitando na TV...") { box.text(t) }
+    }
+
     // Reconecta sozinho no último TV Box ao abrir o app.
     LaunchedEffect(Unit) {
         if (device == "box" && boxIp.isNotBlank()) connectBox(boxIp)
+    }
+
+    // Diálogo: dar um nome bonito pro app fixado
+    pinPkg?.let { pkg ->
+        AlertDialog(
+            onDismissRequest = { pinPkg = null },
+            title = { Text("Fixar atalho") },
+            text = {
+                Column {
+                    Text(pkg, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pinName,
+                        onValueChange = { pinName = it },
+                        label = { Text("Nome do atalho (ex: UniTV)") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = pinName.isNotBlank(),
+                    onClick = {
+                        saveFavs(favs.filterNot { it.second == pkg } + (pinName.trim() to pkg))
+                        status = "Atalho '${pinName.trim()}' fixado."
+                        pinPkg = null
+                    }
+                ) { Text("Fixar") }
+            },
+            dismissButton = { TextButton(onClick = { pinPkg = null }) { Text("Cancelar") } }
+        )
     }
 
     Column(
@@ -337,18 +460,52 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         Divider()
         Spacer(Modifier.height(16.dp))
 
-        // ===== Painel de controle (vale pros dois aparelhos) =====
-        Button(onClick = { act(RemoteAction.UP) }, modifier = Modifier.width(130.dp)) { Text("▲") }
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = { act(RemoteAction.LEFT) }, modifier = Modifier.width(70.dp)) { Text("◀") }
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { act(RemoteAction.OK) }, modifier = Modifier.width(70.dp)) { Text("OK") }
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { act(RemoteAction.RIGHT) }, modifier = Modifier.width(70.dp)) { Text("▶") }
+        // ===== Atalhos fixados (aparecem nos dois, mas só funcionam no Box) =====
+        if (device == "box" && favs.isNotEmpty()) {
+            Text("⭐ Atalhos fixados", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            favs.forEach { (name, pkg) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = { boxOp("Abrindo $name...") { box.launchApp(pkg) } },
+                        modifier = Modifier.weight(1f)
+                    ) { Text(name) }
+                    Spacer(Modifier.width(6.dp))
+                    OutlinedButton(onClick = { saveFavs(favs.filterNot { it.second == pkg }) }) { Text("✕") }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+            Spacer(Modifier.height(10.dp))
+            Divider()
+            Spacer(Modifier.height(16.dp))
         }
-        Spacer(Modifier.height(6.dp))
-        Button(onClick = { act(RemoteAction.DOWN) }, modifier = Modifier.width(130.dp)) { Text("▼") }
+
+        // ===== D-Pad redondo (vale pros dois aparelhos) — segure as setas pra repetir =====
+        HoldKey("▲", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.UP) }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            HoldKey("◀", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.LEFT) }
+            Spacer(Modifier.width(12.dp))
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+                modifier = Modifier
+                    .size(76.dp)
+                    .pointerInput(Unit) { detectTapGestures { act(RemoteAction.OK) } }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("OK", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            HoldKey("▶", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.RIGHT) }
+        }
+        Spacer(Modifier.height(8.dp))
+        HoldKey("▼", shape = CircleShape, modifier = Modifier.size(72.dp)) { act(RemoteAction.DOWN) }
 
         Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.Center) {
@@ -358,15 +515,16 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = { act(RemoteAction.MENU) }) { Text("Menu") }
         }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.Center) {
-            OutlinedButton(onClick = { act(RemoteAction.VOL_DOWN) }) { Text("Vol −") }
+        Spacer(Modifier.height(10.dp))
+        // Volume: segure pra repetir
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            HoldKey("Vol −", modifier = Modifier.width(96.dp)) { act(RemoteAction.VOL_DOWN) }
             Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = { act(RemoteAction.MUTE) }) { Text("Mudo") }
             Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = { act(RemoteAction.VOL_UP) }) { Text("Vol +") }
+            HoldKey("Vol +", modifier = Modifier.width(96.dp)) { act(RemoteAction.VOL_UP) }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.Center) {
             OutlinedButton(onClick = { act(RemoteAction.PLAY_PAUSE) }) { Text("⏯  Play/Pause") }
             Spacer(Modifier.width(8.dp))
@@ -374,6 +532,65 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         }
 
         if (device == "box") {
+            // ===== Teclado (digitar texto na TV) =====
+            Spacer(Modifier.height(18.dp))
+            Divider()
+            Spacer(Modifier.height(12.dp))
+            Text("⌨️ Teclado", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = typed,
+                onValueChange = { typed = it },
+                label = { Text("Texto pra digitar na TV") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Button(onClick = { sendText() }, enabled = typed.isNotBlank()) { Text("Enviar") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { boxOp("Apagando...") { box.backspace() } }) { Text("⌫") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { boxOp("Enter...") { box.enter() } }) { Text("Enter") }
+            }
+
+            // ===== Touchpad (rolar a tela) =====
+            Spacer(Modifier.height(18.dp))
+            Divider()
+            Spacer(Modifier.height(12.dp))
+            Text("🖱️ Touchpad — arraste pra rolar, toque = OK", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+                    .pointerInput(Unit) {
+                        detectTapGestures { act(RemoteAction.OK) }
+                    }
+                    .pointerInput(Unit) {
+                        var accX = 0f
+                        var accY = 0f
+                        detectDragGestures(
+                            onDragStart = { accX = 0f; accY = 0f },
+                            onDragEnd = {
+                                // escala o gesto pra um swipe perceptível na TV
+                                if (kotlin.math.abs(accX) > 30f || kotlin.math.abs(accY) > 30f) {
+                                    boxScroll(accX * 1.4f, accY * 1.4f)
+                                }
+                            }
+                        ) { change, dragAmount ->
+                            change.consume()
+                            accX += dragAmount.x
+                            accY += dragAmount.y
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("deslize aqui", style = MaterialTheme.typography.bodyMedium)
+            }
+
+            // ===== Atalhos do TV Box =====
             Spacer(Modifier.height(18.dp))
             Divider()
             Spacer(Modifier.height(12.dp))
@@ -400,13 +617,20 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             }
             if (apps.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
-                Text("Toque pra abrir (ex: UniTV está na lista):", style = MaterialTheme.typography.bodySmall)
+                Text("Toque pra abrir, ⭐ pra fixar como atalho:", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(4.dp))
                 apps.forEach { pkg ->
-                    OutlinedButton(
-                        onClick = { boxOp("Abrindo $pkg...") { box.launchApp(pkg) } },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text(pkg) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { boxOp("Abrindo $pkg...") { box.launchApp(pkg) } },
+                            modifier = Modifier.weight(1f)
+                        ) { Text(pkg) }
+                        Spacer(Modifier.width(6.dp))
+                        OutlinedButton(onClick = { pinName = ""; pinPkg = pkg }) { Text("⭐") }
+                    }
                     Spacer(Modifier.height(4.dp))
                 }
             }
