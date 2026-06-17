@@ -138,6 +138,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
 
     // TV Box
     var boxIp by remember { mutableStateOf(prefs.getString("ip", "") ?: "") }
+    var boxMode by remember { mutableStateOf(prefs.getString("boxmode", "receiver") ?: "receiver") }
     var scanning by remember { mutableStateOf(false) }
     var found by remember { mutableStateOf(listOf<String>()) }
 
@@ -147,8 +148,8 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     var lgMac by remember { mutableStateOf(prefs.getString("lg_mac", "") ?: "") }
     var lgFound by remember { mutableStateOf(listOf<String>()) }
 
-    // Atalhos / apps do TV Box
-    var apps by remember { mutableStateOf(listOf<String>()) }
+    // Atalhos / apps do TV Box (nome, pacote)
+    var apps by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var loadingApps by remember { mutableStateOf(false) }
 
     // Teclado
@@ -178,9 +179,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Exception) {}
         scope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    if (device == "box") box.send(action) else lg.send(action)
-                }
+                withContext(Dispatchers.IO) { Remote.send(action) }
             } catch (e: Exception) {
                 status = "Erro: ${e.message}"
             }
@@ -199,6 +198,40 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             } catch (e: Exception) {
                 status = "Falha: ${e.message}"
             }
+        }
+    }
+
+    // Conecta pelo app instalado no Box (sem ADB).
+    fun connectReceiver(target: String) {
+        if (target.isBlank()) return
+        boxIp = target
+        status = "Conectando ao app do Box em $target..."
+        scope.launch {
+            try {
+                val acc = withContext(Dispatchers.IO) {
+                    Remote.boxReceiver.connect(target.trim())
+                    Remote.boxReceiver.accessibilityReady()
+                }
+                prefs.edit().putString("ip", target.trim()).apply()
+                status = if (acc) "Box conectado pelo app ✅"
+                else "Conectado, mas LIGUE a acessibilidade no app do Box (setas/OK não vão sem ela)."
+            } catch (e: Exception) {
+                status = "Não achei o app do Box: ${e.message}. Instalou e ligou o receptor no Box?"
+            }
+        }
+    }
+
+    fun scanReceiver() {
+        scanning = true
+        found = emptyList()
+        status = "Procurando o Box (app receptor) na rede..."
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { NetworkScanner.scan(port = BoxReceiverController.PORT) }
+            found = list
+            scanning = false
+            status = if (list.isEmpty())
+                "Não achei o app do Box. Instalou e ligou o receptor no TV Box?"
+            else "Achei ${list.size}. Toque pra conectar."
         }
     }
 
@@ -270,7 +303,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         status = "Listando apps do TV Box..."
         scope.launch {
             try {
-                apps = withContext(Dispatchers.IO) { box.listUserApps() }
+                apps = withContext(Dispatchers.IO) { Remote.listApps() }
                 status = "Apps: ${apps.size}. Toque pra abrir ou ⭐ pra fixar."
             } catch (e: Exception) {
                 status = "Erro ao listar apps: ${e.message}"
@@ -308,19 +341,19 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     fun sendText() {
         if (typed.isBlank()) return
         val t = typed
-        boxOp("Digitando na TV...") { box.text(t) }
+        boxOp("Digitando na TV...") { Remote.boxText(t) }
     }
 
     fun castOpen() {
         if (castUrl.isBlank()) return
         val u = castUrl
-        boxOp("Abrindo na TV...") { box.openUrl(u) }
+        boxOp("Abrindo na TV...") { Remote.openUrl(u) }
     }
 
     fun ytSearch() {
         if (ytQuery.isBlank()) return
         val q = ytQuery
-        boxOp("Buscando \"$q\" na TV...") { box.youtubeSearch(q) }
+        boxOp("Buscando \"$q\" na TV...") { Remote.youtubeSearch(q) }
     }
 
     fun lgInput() = boxOp("Trocando entrada da TV...") { lg.switchInput() }
@@ -361,10 +394,16 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
 
     // Reconecta sozinho no último TV Box ao abrir o app.
     LaunchedEffect(Unit) {
-        if (device == "box" && boxIp.isNotBlank()) connectBox(boxIp)
+        if (device == "box" && boxIp.isNotBlank()) {
+            if (boxMode == "receiver") connectReceiver(boxIp) else connectBox(boxIp)
+        }
     }
-    // Mantém o aparelho ativo em sincronia com o controle flutuante.
+    // Mantém aparelho/transporte em sincronia com o controle flutuante.
     LaunchedEffect(device) { Remote.device = device }
+    LaunchedEffect(boxMode) {
+        Remote.boxMode = boxMode
+        prefs.edit().putString("boxmode", boxMode).apply()
+    }
 
     // Diálogo: dar um nome bonito pro app fixado
     pinPkg?.let { pkg ->
@@ -424,6 +463,20 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         Spacer(Modifier.height(14.dp))
 
         if (device == "box") {
+            Row {
+                FilterChip(
+                    selected = boxMode == "receiver",
+                    onClick = { boxMode = "receiver"; found = emptyList() },
+                    label = { Text("📲 App do Box") }
+                )
+                Spacer(Modifier.width(10.dp))
+                FilterChip(
+                    selected = boxMode == "adb",
+                    onClick = { boxMode = "adb"; found = emptyList() },
+                    label = { Text("🔌 ADB") }
+                )
+            }
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = boxIp,
                 onValueChange = { boxIp = it },
@@ -433,26 +486,34 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             )
             Spacer(Modifier.height(8.dp))
             Button(
-                onClick = { connectBox(boxIp.trim()) },
+                onClick = { if (boxMode == "receiver") connectReceiver(boxIp.trim()) else connectBox(boxIp.trim()) },
                 enabled = boxIp.isNotBlank() && !scanning,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Conectar") }
+            ) { Text(if (boxMode == "receiver") "Conectar (app do Box)" else "Conectar (ADB)") }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
-                onClick = { doScan() },
+                onClick = { if (boxMode == "receiver") scanReceiver() else doScan() },
                 enabled = !scanning,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text(if (scanning) "Procurando..." else "🔍 Procurar TV Box na rede") }
+            ) { Text(if (scanning) "Procurando..." else "🔍 Procurar Box na rede") }
             if (found.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 found.forEach { dev ->
                     OutlinedButton(
-                        onClick = { connectBox(dev) },
+                        onClick = { if (boxMode == "receiver") connectReceiver(dev) else connectBox(dev) },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("📺  $dev") }
                     Spacer(Modifier.height(4.dp))
                 }
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (boxMode == "receiver")
+                    "Instale o app 'Controle TV (Receptor)' no TV Box e ligue a acessibilidade nele. Depois é só procurar aqui."
+                else
+                    "ADB avançado: precisa do 'ADB pela rede' ligado no Box (porta 5555).",
+                style = MaterialTheme.typography.bodySmall
+            )
         } else {
             OutlinedTextField(
                 value = lgIp,
@@ -533,7 +594,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = { boxOp("Abrindo $name...") { box.launchApp(pkg) } },
+                        onClick = { boxOp("Abrindo $name...") { Remote.launchApp(pkg) } },
                         modifier = Modifier.weight(1f)
                     ) { Text(name) }
                     Spacer(Modifier.width(6.dp))
@@ -711,46 +772,46 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                 modifier = Modifier.fillMaxWidth()
             ) { Text("📲 Espelhar tela (Smart View / Transmitir)") }
 
-            // ===== Atalhos do TV Box =====
+            // ===== Apps do TV Box =====
             Spacer(Modifier.height(18.dp))
             Divider()
             Spacer(Modifier.height(12.dp))
-            Text("Atalhos do TV Box", style = MaterialTheme.typography.titleMedium)
+            Text("Apps do TV Box", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { boxOp("Abrindo YouTube...") { box.launchYoutube() } }) { Text("YouTube") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { boxOp("Abrindo Configurações...") { box.openSettings() } }) { Text("Config") }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { boxOp("Abrindo Aplicativos...") { box.openAppsSettings() } }) { Text("Aplicativos") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { boxOp("Limpando cache...") { box.clearCache() } }) { Text("Limpar cache") }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { boxOp("Fechando apps...") { box.closeApps() } }) { Text("Fechar apps") }
+                OutlinedButton(onClick = { boxOp("Abrindo YouTube...") { Remote.openUrl("https://www.youtube.com/") } }) { Text("YouTube") }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = { loadApps() }, enabled = !loadingApps) {
                     Text(if (loadingApps) "..." else "📋 Meus apps")
                 }
             }
+
+            if (boxMode == "adb") {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.Center) {
+                    OutlinedButton(onClick = { boxOp("Abrindo Configurações...") { box.openSettings() } }) { Text("Config") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { boxOp("Limpando cache...") { box.clearCache() } }) { Text("Limpar cache") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { boxOp("Fechando apps...") { box.closeApps() } }) { Text("Fechar apps") }
+                }
+            }
+
             if (apps.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 Text("Toque pra abrir, ⭐ pra fixar como atalho:", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(4.dp))
-                apps.forEach { pkg ->
+                apps.forEach { (name, pkg) ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         OutlinedButton(
-                            onClick = { boxOp("Abrindo $pkg...") { box.launchApp(pkg) } },
+                            onClick = { boxOp("Abrindo $name...") { Remote.launchApp(pkg) } },
                             modifier = Modifier.weight(1f)
-                        ) { Text(pkg) }
+                        ) { Text(name) }
                         Spacer(Modifier.width(6.dp))
-                        OutlinedButton(onClick = { pinName = ""; pinPkg = pkg }) { Text("⭐") }
+                        OutlinedButton(onClick = { pinName = name; pinPkg = pkg }) { Text("⭐") }
                     }
                     Spacer(Modifier.height(4.dp))
                 }
