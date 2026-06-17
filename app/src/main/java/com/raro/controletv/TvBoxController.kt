@@ -50,12 +50,65 @@ class TvBoxController {
         d.shell("input keyevent $code")
     }
 
+    /** Traduz a ação genérica para o keyevent do Android e envia. */
+    fun send(action: RemoteAction) {
+        val code = when (action) {
+            RemoteAction.UP -> 19
+            RemoteAction.DOWN -> 20
+            RemoteAction.LEFT -> 21
+            RemoteAction.RIGHT -> 22
+            RemoteAction.OK -> 23
+            RemoteAction.BACK -> 4
+            RemoteAction.HOME -> 3
+            RemoteAction.MENU -> 82
+            RemoteAction.VOL_UP -> 24
+            RemoteAction.VOL_DOWN -> 25
+            RemoteAction.MUTE -> 164
+            RemoteAction.POWER -> 26
+            RemoteAction.PLAY_PAUSE -> 85
+        }
+        keyevent(code)
+    }
+
     /** Digita texto no campo focado da TV. */
     fun text(t: String) {
         val d = dadb ?: throw IllegalStateException("Não conectado ao TV Box.")
         val safe = t.replace("\"", "").replace(" ", "%s")
         d.shell("input text \"$safe\"")
     }
+
+    private fun sh(cmd: String): String {
+        val d = dadb ?: throw IllegalStateException("Não conectado ao TV Box.")
+        return d.shell(cmd).allOutput
+    }
+
+    /** Abre um app pelo nome do pacote (ex: com.google.android.youtube). */
+    fun launchApp(pkg: String) {
+        sh("monkey -p $pkg -c android.intent.category.LAUNCHER 1")
+    }
+
+    /** YouTube: tenta a versão de TV; se não tiver, a versão comum. */
+    fun launchYoutube() {
+        val out = sh("monkey -p com.google.android.youtube.tv -c android.intent.category.LAUNCHER 1")
+        if (out.contains("No activities found", true) || out.contains("Error", true)) {
+            sh("monkey -p com.google.android.youtube -c android.intent.category.LAUNCHER 1")
+        }
+    }
+
+    fun openSettings() = run { sh("am start -a android.settings.SETTINGS"); Unit }
+    fun openAppsSettings() = run { sh("am start -a android.settings.APPLICATION_SETTINGS"); Unit }
+    /** Libera cache de apps (sem root). */
+    fun clearCache() = run { sh("pm trim-caches 9999999999"); Unit }
+    /** Fecha apps em segundo plano. */
+    fun closeApps() = run { sh("am kill-all"); Unit }
+
+    /** Lista os apps instalados pelo usuário (pacotes). */
+    fun listUserApps(): List<String> =
+        sh("pm list packages -3").lineSequence()
+            .map { it.trim().removePrefix("package:").trim() }
+            .filter { it.isNotBlank() }
+            .sorted()
+            .toList()
 
     fun disconnect() {
         try {
