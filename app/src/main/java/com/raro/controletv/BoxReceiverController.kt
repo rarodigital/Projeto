@@ -98,6 +98,7 @@ class BoxReceiverController {
     fun move(dx: Int, dy: Int) { get("/move?dx=$dx&dy=$dy") }
     fun click() { get("/click") }
     fun scroll(d: Int) { get("/scroll?d=$d") }
+    fun closeAll(): String = get("/closeall")
 
     /** Lista apps do Box: pares (nome, pacote). */
     fun listApps(): List<Pair<String, String>> =

@@ -221,6 +221,32 @@ class RemoteAccessibilityService : AccessibilityService() {
         return null
     }
 
+    // ---- Limpar (fechar apps): abre recentes e clica em "limpar tudo" ----
+    fun closeAll(): Boolean {
+        recents()
+        main.postDelayed({
+            val root = rootInActiveWindow ?: return@postDelayed
+            val n = findClickableByText(root, listOf("limpar tudo", "fechar tudo", "clear all", "close all", "fechar todos", "limpar", "clear"))
+            n?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }, 800)
+        return true
+    }
+
+    private fun findClickableByText(node: AccessibilityNodeInfo?, words: List<String>): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val t = ((node.text?.toString() ?: "") + " " + (node.contentDescription?.toString() ?: "")).lowercase()
+        if (words.any { t.contains(it) }) {
+            var n: AccessibilityNodeInfo? = node
+            while (n != null) { if (n.isClickable) return n; n = n.parent }
+            return node
+        }
+        for (i in 0 until node.childCount) {
+            val r = findClickableByText(node.getChild(i), words)
+            if (r != null) return r
+        }
+        return null
+    }
+
     // ---- Texto ----
     fun typeText(text: String): Boolean {
         val node = focusedNode() ?: return false

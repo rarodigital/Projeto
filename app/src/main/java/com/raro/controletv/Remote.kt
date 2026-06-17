@@ -52,6 +52,7 @@ object Remote {
     fun mouseMove(dx: Int, dy: Int) { if (useReceiver) boxReceiver.move(dx, dy) }
     fun mouseClick() { if (useReceiver) boxReceiver.click() }
     fun mouseScroll(d: Int) { if (useReceiver) boxReceiver.scroll(d) }
+    fun closeAll(): String = if (useReceiver) boxReceiver.closeAll() else { box.closeApps(); "ok" }
 
     val boxHost: String get() = if (useReceiver) boxReceiver.host else box.host
 }

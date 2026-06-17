@@ -59,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -228,6 +229,8 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     var typed by remember { mutableStateOf("") }
     var castUrl by remember { mutableStateOf("") }
     var ytQuery by remember { mutableStateOf("") }
+    var showText by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     fun loadFavs(): List<Pair<String, String>> =
         (prefs.getString("favs", "") ?: "").split("\n").filter { it.contains("\t") }
@@ -395,6 +398,28 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         )
     }
 
+    // Diálogo de digitar (acessível do Controle e do Mouse)
+    if (showText) {
+        AlertDialog(
+            onDismissRequest = { showText = false },
+            title = { Text("Digitar na TV") },
+            text = {
+                Column {
+                    OutlinedTextField(value = typed, onValueChange = { typed = it }, label = { Text("Texto") }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(6.dp))
+                    Row {
+                        TextButton(onClick = { clipboard.getText()?.let { typed += it.text } }) { Text("Colar") }
+                        TextButton(onClick = { typed = "" }) { Text("Limpar") }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = typed.isNotBlank(), onClick = { boxAction("Digitando...") { Remote.boxText(typed) }; showText = false }) { Text("Enviar") }
+            },
+            dismissButton = { TextButton(onClick = { showText = false }) { Text("Fechar") } }
+        )
+    }
+
     val tabs = listOf("🎮" to "Controle", "🖱️" to "Mouse", "📺" to "Apps", "🎬" to "Cast", "🔌" to "Conexão")
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -415,21 +440,23 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
 
         Crossfade(targetState = tab, label = "tab", modifier = Modifier.weight(1f)) { t ->
             when (t) {
-                0 -> ControlTab(device, { act(it) }, { io { lg.switchInput() } })
-                1 -> MouseTab({ act(it) }, onMove = { x, y -> io { Remote.mouseMove(x, y) } }, onScroll = { d -> io { Remote.mouseScroll(d) } }, onClick = { io { Remote.mouseShow(true); Remote.mouseClick() } }, onHide = { io { Remote.mouseShow(false) } })
+                0 -> ControlTab(device, { act(it) }, { io { lg.switchInput() } }, onKeyboard = { showText = true })
+                1 -> MouseTab({ act(it) }, onMove = { x, y -> io { Remote.mouseMove(x, y) } }, onScroll = { d -> io { Remote.mouseScroll(d) } }, onClick = { io { Remote.mouseShow(true); Remote.mouseClick() } }, onHide = { io { Remote.mouseShow(false) } }, onKeyboard = { showText = true })
                 2 -> AppsTab(
                     favs = favs, apps = apps, loadingApps = loadingApps,
                     onYoutube = { boxAction("Abrindo YouTube...") { Remote.openUrl("https://www.youtube.com/") } },
                     onLoadApps = { loadApps() },
                     onLaunch = { name, pkg -> boxAction("Abrindo $name...") { Remote.launchApp(pkg) } },
                     onPin = { name, pkg -> pinName = name; pinPkg = pkg },
-                    onUnpin = { pkg -> saveFavs(favs.filterNot { it.second == pkg }) }
+                    onUnpin = { pkg -> saveFavs(favs.filterNot { it.second == pkg }) },
+                    onCloseAll = { boxAction("Fechando apps abertos...") { Remote.closeAll() } }
                 )
                 3 -> CastTab(
                     castUrl = castUrl, onCastUrl = { castUrl = it }, onCast = { boxAction("Abrindo na TV...") { Remote.openUrl(castUrl) } },
                     ytQuery = ytQuery, onYt = { ytQuery = it }, onYtSearch = { boxAction("Buscando na TV...") { Remote.youtubeSearch(ytQuery) } },
                     typed = typed, onTyped = { typed = it }, onSendText = { boxAction("Digitando...") { Remote.boxText(typed) } },
-                    onMirror = { openCastPanel() }
+                    onMirror = { openCastPanel() },
+                    onMirrorApp = { boxAction("Abrindo AirScreen na TV...") { Remote.launchApp("com.ionitech.airscreen") } }
                 )
                 else -> ConexaoTab(
                     device = device, onDevice = { device = it; prefs.edit().putString("device", it).apply() },
@@ -459,7 +486,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
 }
 
 @Composable
-private fun ControlTab(device: String, act: (RemoteAction) -> Unit, onLgInput: () -> Unit) {
+private fun ControlTab(device: String, act: (RemoteAction) -> Unit, onLgInput: () -> Unit, onKeyboard: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -499,13 +526,14 @@ private fun ControlTab(device: String, act: (RemoteAction) -> Unit, onLgInput: (
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = { act(RemoteAction.PLAY_PAUSE) }) { Text("⏯  Play/Pause") }
+            OutlinedButton(onClick = onKeyboard) { Text("⌨️ Teclado") }
             if (device == "lg") OutlinedButton(onClick = onLgInput) { Text("🔀 Entrada") }
         }
     }
 }
 
 @Composable
-private fun MouseTab(act: (RemoteAction) -> Unit, onMove: (Int, Int) -> Unit, onScroll: (Int) -> Unit, onClick: () -> Unit, onHide: () -> Unit) {
+private fun MouseTab(act: (RemoteAction) -> Unit, onMove: (Int, Int) -> Unit, onScroll: (Int) -> Unit, onClick: () -> Unit, onHide: () -> Unit, onKeyboard: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         Text("Touchpad — mova o cursor; toque = clique; 2 dedos ou a barra → rolar", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
@@ -532,6 +560,7 @@ private fun MouseTab(act: (RemoteAction) -> Unit, onMove: (Int, Int) -> Unit, on
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { act(RemoteAction.BACK) }, modifier = Modifier.weight(1f)) { Text("Voltar") }
             OutlinedButton(onClick = { act(RemoteAction.HOME) }, modifier = Modifier.weight(1f)) { Text("Home") }
+            OutlinedButton(onClick = onKeyboard, modifier = Modifier.weight(1f)) { Text("⌨️") }
             OutlinedButton(onClick = onHide, modifier = Modifier.weight(1f)) { Text("Esconder") }
         }
     }
@@ -541,13 +570,15 @@ private fun MouseTab(act: (RemoteAction) -> Unit, onMove: (Int, Int) -> Unit, on
 private fun AppsTab(
     favs: List<Pair<String, String>>, apps: List<Pair<String, String>>, loadingApps: Boolean,
     onYoutube: () -> Unit, onLoadApps: () -> Unit, onLaunch: (String, String) -> Unit,
-    onPin: (String, String) -> Unit, onUnpin: (String) -> Unit
+    onPin: (String, String) -> Unit, onUnpin: (String) -> Unit, onCloseAll: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = onYoutube) { Text("▶️ YouTube") }
             OutlinedButton(onClick = onLoadApps, enabled = !loadingApps) { Text(if (loadingApps) "..." else "📋 Meus apps") }
         }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = onCloseAll, modifier = Modifier.fillMaxWidth()) { Text("🧹 Fechar apps abertos (limpar)") }
         if (favs.isNotEmpty()) {
             Spacer(Modifier.height(16.dp)); Text("⭐ Atalhos fixados", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp))
             favs.forEach { (name, pkg) ->
@@ -578,7 +609,7 @@ private fun CastTab(
     castUrl: String, onCastUrl: (String) -> Unit, onCast: () -> Unit,
     ytQuery: String, onYt: (String) -> Unit, onYtSearch: () -> Unit,
     typed: String, onTyped: (String) -> Unit, onSendText: () -> Unit,
-    onMirror: () -> Unit
+    onMirror: () -> Unit, onMirrorApp: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("▶️ Play on TV", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp))
@@ -597,9 +628,11 @@ private fun CastTab(
         Button(onClick = onSendText, enabled = typed.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Enviar texto") }
 
         Spacer(Modifier.height(18.dp)); Text("📲 Espelhar tela", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(4.dp))
-        Text("Abre o Smart View do Android (a TV/Box precisa ter Miracast).", style = MaterialTheme.typography.bodySmall)
+        Text("1) Liga o receptor de tela no Box (AirScreen) → 2) abre o Smart View e escolhe o Box.", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onMirror, modifier = Modifier.fillMaxWidth()) { Text("📲 Espelhar (Smart View)") }
+        Button(onClick = onMirrorApp, modifier = Modifier.fillMaxWidth()) { Text("1) Ligar AirScreen na TV") }
+        Spacer(Modifier.height(6.dp))
+        OutlinedButton(onClick = onMirror, modifier = Modifier.fillMaxWidth()) { Text("2) Espelhar (Smart View)") }
     }
 }
 

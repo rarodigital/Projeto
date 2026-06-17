@@ -152,6 +152,7 @@ class ReceiverService : Service() {
                 if (acc == null) "no-accessibility" else { acc.moveCursor(dx, dy); "ok" }
             }
             path == "/click" -> { if (acc == null) "no-accessibility" else { acc.clickCursor(); "ok" } }
+            path == "/closeall" -> { if (acc == null) "no-accessibility" else { acc.closeAll(); "ok" } }
             path == "/scroll" -> {
                 val d = params["d"]?.toFloatOrNull() ?: 1f
                 if (acc == null) "no-accessibility" else { acc.scrollCursor(d); "ok" }
