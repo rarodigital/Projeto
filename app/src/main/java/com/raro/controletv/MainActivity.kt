@@ -92,6 +92,26 @@ class MainActivity : ComponentActivity() {
     private val box = Remote.box
     private val lg = Remote.lg
 
+    // Ao minimizar, abre o controle flutuante (se ligado e com permissão).
+    override fun onStop() {
+        super.onStop()
+        val p = getSharedPreferences("ctv", Context.MODE_PRIVATE)
+        if (p.getBoolean("float_auto", false) &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this))
+        ) {
+            try {
+                val i = Intent(this, FloatingService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Ao voltar pro app, esconde o flutuante.
+    override fun onStart() {
+        super.onStart()
+        try { stopService(Intent(this, FloatingService::class.java)) } catch (_: Exception) {}
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("ctv", Context.MODE_PRIVATE)
@@ -402,9 +422,10 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             try { ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
             return
         }
+        prefs.edit().putBoolean("float_auto", true).apply()
         val i = Intent(ctx, FloatingService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
-        status = "Controle flutuante ligado."
+        status = "Flutuante ligado. Ao minimizar o app, ele aparece sozinho. (✕ no flutuante desliga.)"
     }
     fun openCastPanel() {
         // tenta o Smart View da Samsung primeiro (é o que acha o Box pra ele), depois o painel padrão
