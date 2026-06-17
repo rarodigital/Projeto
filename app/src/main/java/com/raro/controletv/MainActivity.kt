@@ -57,6 +57,8 @@ fun RemoteScreen(controller: TvBoxController, prefs: SharedPreferences) {
     var ip by remember { mutableStateOf(prefs.getString("ip", "") ?: "") }
     var status by remember { mutableStateOf("Desconectado") }
     var connected by remember { mutableStateOf(false) }
+    var scanning by remember { mutableStateOf(false) }
+    var found by remember { mutableStateOf(listOf<String>()) }
 
     fun send(code: Int) {
         scope.launch {
@@ -66,6 +68,37 @@ fun RemoteScreen(controller: TvBoxController, prefs: SharedPreferences) {
                 status = "Erro: ${e.message}"
                 connected = false
             }
+        }
+    }
+
+    fun connectTo(target: String) {
+        ip = target
+        status = "Conectando a $target..."
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { controller.connect(target.trim()) }
+                prefs.edit().putString("ip", target.trim()).apply()
+                connected = true
+                status = "Conectado a ${controller.host}"
+            } catch (e: Exception) {
+                connected = false
+                status = "Falha: ${e.message}"
+            }
+        }
+    }
+
+    fun doScan() {
+        scanning = true
+        found = emptyList()
+        status = "Procurando TV Box na rede..."
+        scope.launch {
+            val list = NetworkScanner.scan()
+            found = list
+            scanning = false
+            status = if (list.isEmpty())
+                "Nenhum aparelho com ADB encontrado. Ligue a Depuração ADB no TV Box e confira o Wi-Fi."
+            else
+                "Encontrei ${list.size}. Toque no IP pra conectar."
         }
     }
 
@@ -88,22 +121,28 @@ fun RemoteScreen(controller: TvBoxController, prefs: SharedPreferences) {
         )
         Spacer(Modifier.height(8.dp))
         Button(
-            onClick = {
-                status = "Conectando..."
-                scope.launch {
-                    try {
-                        withContext(Dispatchers.IO) { controller.connect(ip.trim()) }
-                        prefs.edit().putString("ip", ip.trim()).apply()
-                        connected = true
-                        status = "Conectado a ${controller.host}"
-                    } catch (e: Exception) {
-                        connected = false
-                        status = "Falha: ${e.message}"
-                    }
-                }
-            },
+            onClick = { connectTo(ip.trim()) },
+            enabled = ip.isNotBlank() && !scanning,
             modifier = Modifier.fillMaxWidth()
         ) { Text(if (connected) "Reconectar" else "Conectar") }
+
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { doScan() },
+            enabled = !scanning,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(if (scanning) "Procurando..." else "🔍 Procurar TV Box na rede") }
+
+        if (found.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            found.forEach { device ->
+                OutlinedButton(
+                    onClick = { connectTo(device) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("📺  $device") }
+                Spacer(Modifier.height(4.dp))
+            }
+        }
 
         Spacer(Modifier.height(6.dp))
         Text(status)
