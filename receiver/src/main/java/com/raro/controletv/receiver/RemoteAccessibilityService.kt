@@ -95,17 +95,18 @@ class RemoteAccessibilityService : AccessibilityService() {
                 if (scrollable.performAction(act)) return true
             }
         }
-        // 3) fallback: deslize LONGO e firme (nunca um toque, pra não "abrir" sem querer)
+        // 3) fallback: deslize médio e lento — move ~1 item, mas com duração suficiente
+        //    pra NUNCA ser confundido com um toque (que abriria o item).
         val (w, h) = screenSize()
         val cx = w / 2
         val cy = h / 2
-        val dx = (w * 0.32f).toInt()
-        val dy = (h * 0.32f).toInt()
+        val dx = (w * 0.17f).toInt()
+        val dy = (h * 0.17f).toInt()
         when (direction) {
-            View.FOCUS_DOWN -> swipe(cx, cy, cx, cy - dy, 180)
-            View.FOCUS_UP -> swipe(cx, cy, cx, cy + dy, 180)
-            View.FOCUS_RIGHT -> swipe(cx, cy, cx - dx, cy, 180)
-            View.FOCUS_LEFT -> swipe(cx, cy, cx + dx, cy, 180)
+            View.FOCUS_DOWN -> swipe(cx, cy, cx, cy - dy, 130)
+            View.FOCUS_UP -> swipe(cx, cy, cx, cy + dy, 130)
+            View.FOCUS_RIGHT -> swipe(cx, cy, cx - dx, cy, 130)
+            View.FOCUS_LEFT -> swipe(cx, cy, cx + dx, cy, 130)
         }
         return true
     }

@@ -259,6 +259,18 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     }
     fun io(block: () -> Unit) { scope.launch { try { withContext(Dispatchers.IO) { block() } } catch (_: Exception) {} } }
 
+    // Trocar canal no Box (UniTV): macro OK → ▲/▼ → OK (abre lista, anda 1, confirma)
+    fun channelBox(up: Boolean) {
+        status = if (up) "Canal + (OK→▲→OK)..." else "Canal − (OK→▼→OK)..."
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { Remote.send(RemoteAction.OK) }; delay(600)
+                withContext(Dispatchers.IO) { Remote.send(if (up) RemoteAction.UP else RemoteAction.DOWN) }; delay(600)
+                withContext(Dispatchers.IO) { Remote.send(RemoteAction.OK) }
+            } catch (e: Exception) { status = "Erro: ${e.message}" }
+        }
+    }
+
     fun connectBox(target: String) {
         if (target.isBlank()) return
         boxIp = target; status = "Conectando a $target..."
@@ -511,7 +523,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
 
         Crossfade(targetState = tab, label = "tab", modifier = Modifier.weight(1f)) { t ->
             when (t) {
-                0 -> ControlTab(device, { act(it) }, { io { lg.switchInput() } }, onKeyboard = { showText = true })
+                0 -> ControlTab(device, { act(it) }, { io { lg.switchInput() } }, onKeyboard = { showText = true }, onChannel = { up -> if (device == "lg") act(if (up) RemoteAction.CHANNEL_UP else RemoteAction.CHANNEL_DOWN) else channelBox(up) }, favs = favs, onLaunch = { name, pkg -> boxAction("Abrindo $name...") { Remote.launchApp(pkg) } })
                 1 -> MouseTab({ act(it) }, onMove = { x, y -> io { Remote.mouseMove(x, y) } }, onScroll = { d -> io { Remote.mouseScroll(d) } }, onClick = { io { Remote.mouseShow(true); Remote.mouseClick() } }, onHide = { io { Remote.mouseShow(false) } }, onKeyboard = { showText = true })
                 2 -> AppsTab(
                     favs = favs, apps = apps, loadingApps = loadingApps,
@@ -559,55 +571,73 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
 }
 
 @Composable
-private fun ControlTab(device: String, act: (RemoteAction) -> Unit, onLgInput: () -> Unit, onKeyboard: () -> Unit) {
+private fun ControlTab(device: String, act: (RemoteAction) -> Unit, onLgInput: () -> Unit, onKeyboard: () -> Unit, onChannel: (Boolean) -> Unit, favs: List<Pair<String, String>>, onLaunch: (String, String) -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // topo: Power / Home / Mudo
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            HoldKey("⏻", shape = CircleShape, container = Color(0xFF8A2B2B), content = Color.White, modifier = Modifier.size(60.dp)) { act(RemoteAction.POWER) }
-            HoldKey("⌂", shape = CircleShape, modifier = Modifier.size(60.dp)) { act(RemoteAction.HOME) }
-            HoldKey("🔇", shape = CircleShape, container = MaterialTheme.colorScheme.surfaceVariant, content = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(60.dp)) { act(RemoteAction.MUTE) }
+        Spacer(Modifier.height(6.dp))
+        // topo: ícones rápidos
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            HoldKey("⏻", shape = CircleShape, container = Color(0xFF8A2B2B), content = Color.White, modifier = Modifier.size(56.dp)) { act(RemoteAction.POWER) }
+            HoldKey("⌂", shape = CircleShape, container = MaterialTheme.colorScheme.surfaceVariant, content = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(56.dp)) { act(RemoteAction.HOME) }
+            HoldKey("🔇", shape = CircleShape, container = MaterialTheme.colorScheme.surfaceVariant, content = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(56.dp)) { act(RemoteAction.MUTE) }
+            HoldKey("⌨", shape = CircleShape, container = MaterialTheme.colorScheme.surfaceVariant, content = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(56.dp)) { onKeyboard() }
         }
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(26.dp))
         // D-pad redondo
-        HoldKey("▲", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.UP) }
+        HoldKey("▲", shape = CircleShape, modifier = Modifier.size(78.dp)) { act(RemoteAction.UP) }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            HoldKey("◀", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.LEFT) }
+            HoldKey("◀", shape = CircleShape, modifier = Modifier.size(78.dp)) { act(RemoteAction.LEFT) }
             Spacer(Modifier.width(14.dp))
-            HoldKey("OK", shape = CircleShape, container = MaterialTheme.colorScheme.secondary, content = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.size(84.dp)) { act(RemoteAction.OK) }
+            HoldKey("OK", shape = CircleShape, container = MaterialTheme.colorScheme.secondary, content = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.size(86.dp)) { act(RemoteAction.OK) }
             Spacer(Modifier.width(14.dp))
-            HoldKey("▶", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.RIGHT) }
+            HoldKey("▶", shape = CircleShape, modifier = Modifier.size(78.dp)) { act(RemoteAction.RIGHT) }
         }
         Spacer(Modifier.height(10.dp))
-        HoldKey("▼", shape = CircleShape, modifier = Modifier.size(76.dp)) { act(RemoteAction.DOWN) }
+        HoldKey("▼", shape = CircleShape, modifier = Modifier.size(78.dp)) { act(RemoteAction.DOWN) }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = { act(RemoteAction.BACK) }) { Text("Voltar") }
-            OutlinedButton(onClick = { act(RemoteAction.HOME) }) { Text("Home") }
             OutlinedButton(onClick = { act(RemoteAction.MENU) }) { Text("Menu") }
+            OutlinedButton(onClick = { act(RemoteAction.PLAY_PAUSE) }) { Text("⏯") }
+        }
+
+        Spacer(Modifier.height(22.dp))
+        // Volume e Canal, organizados embaixo
+        Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Volume", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HoldKey("−", shape = CircleShape, modifier = Modifier.size(58.dp)) { act(RemoteAction.VOL_DOWN) }
+                    HoldKey("+", shape = CircleShape, modifier = Modifier.size(58.dp)) { act(RemoteAction.VOL_UP) }
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Canal", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HoldKey("−", shape = CircleShape, modifier = Modifier.size(58.dp)) { onChannel(false) }
+                    HoldKey("+", shape = CircleShape, modifier = Modifier.size(58.dp)) { onChannel(true) }
+                }
+            }
+        }
+        if (device == "lg") {
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = onLgInput) { Text("🔀 Trocar entrada") }
+        }
+        if (favs.isNotEmpty()) {
+            Spacer(Modifier.height(20.dp))
+            Text("Atalhos", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                favs.forEach { (name, pkg) -> Button(onClick = { onLaunch(name, pkg) }) { Text(name) } }
+            }
         }
         Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HoldKey("Vol −", modifier = Modifier.width(100.dp)) { act(RemoteAction.VOL_DOWN) }
-            OutlinedButton(onClick = { act(RemoteAction.MUTE) }) { Text("Mudo") }
-            HoldKey("Vol +", modifier = Modifier.width(100.dp)) { act(RemoteAction.VOL_UP) }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = { act(RemoteAction.PLAY_PAUSE) }) { Text("⏯  Play/Pause") }
-            OutlinedButton(onClick = onKeyboard) { Text("⌨️ Teclado") }
-            if (device == "lg") OutlinedButton(onClick = onLgInput) { Text("🔀 Entrada") }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HoldKey("CH −", modifier = Modifier.width(100.dp)) { act(RemoteAction.CHANNEL_DOWN) }
-            Text("Canal", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            HoldKey("CH +", modifier = Modifier.width(100.dp)) { act(RemoteAction.CHANNEL_UP) }
-        }
     }
 }
 
