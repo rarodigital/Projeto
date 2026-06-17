@@ -1,8 +1,12 @@
 package com.raro.controletv
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -60,8 +64,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
-    private val box = TvBoxController()
-    private val lg = LgTvController()
+    // Conexão compartilhada com o controle flutuante (Remote).
+    private val box = Remote.box
+    private val lg = Remote.lg
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -302,10 +307,32 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         boxOp("Digitando na TV...") { box.text(t) }
     }
 
+    // Liga o controle flutuante (bolha por cima dos outros apps).
+    fun enableFloating() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(ctx)) {
+            status = "Permita 'desenhar sobre outros apps' e toque de novo."
+            try {
+                ctx.startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${ctx.packageName}")
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) {}
+            return
+        }
+        val i = Intent(ctx, FloatingService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i)
+        else ctx.startService(i)
+        status = "Controle flutuante ligado. Pode sair do app — a bolha fica na tela."
+    }
+
     // Reconecta sozinho no último TV Box ao abrir o app.
     LaunchedEffect(Unit) {
         if (device == "box" && boxIp.isNotBlank()) connectBox(boxIp)
     }
+    // Mantém o aparelho ativo em sincronia com o controle flutuante.
+    LaunchedEffect(device) { Remote.device = device }
 
     // Diálogo: dar um nome bonito pro app fixado
     pinPkg?.let { pkg ->
@@ -456,6 +483,10 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
 
         Spacer(Modifier.height(6.dp))
         Text(status)
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = { enableFloating() }, modifier = Modifier.fillMaxWidth()) {
+            Text("🫧 Controle flutuante (continua na tela ao sair)")
+        }
         Spacer(Modifier.height(16.dp))
         Divider()
         Spacer(Modifier.height(16.dp))
