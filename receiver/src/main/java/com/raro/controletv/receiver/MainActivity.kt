@@ -5,7 +5,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
-import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -67,10 +66,7 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(help)
 
-        val scroll = ScrollView(this).apply {
-            addView(root)
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
+        val scroll = ScrollView(this).apply { addView(root) }
         setContentView(scroll)
     }
 
