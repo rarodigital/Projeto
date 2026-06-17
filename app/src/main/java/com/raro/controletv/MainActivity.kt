@@ -30,9 +30,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
+import dadb.AdbKeyPair
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,6 +63,19 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferences) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    // Chave ADB persistente: a TV lembra a autorização e não pede toda vez.
+    val keyPair = remember {
+        try {
+            val priv = File(ctx.filesDir, "adbkey")
+            val pub = File(ctx.filesDir, "adbkey.pub")
+            if (!priv.exists() || !pub.exists()) AdbKeyPair.generate(priv, pub)
+            AdbKeyPair.read(priv, pub)
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     var device by remember { mutableStateOf(prefs.getString("device", "box") ?: "box") }
     var status by remember { mutableStateOf("Escolha o aparelho e conecte.") }
@@ -69,12 +88,15 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     // TV LG
     var lgIp by remember { mutableStateOf(prefs.getString("lg_ip", "") ?: "") }
     var lgPin by remember { mutableStateOf("") }
+    var lgMac by remember { mutableStateOf(prefs.getString("lg_mac", "") ?: "") }
+    var lgFound by remember { mutableStateOf(listOf<String>()) }
 
     // Atalhos / apps do TV Box
     var apps by remember { mutableStateOf(listOf<String>()) }
     var loadingApps by remember { mutableStateOf(false) }
 
     fun act(action: RemoteAction) {
+        try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Exception) {}
         scope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -87,15 +109,41 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     }
 
     fun connectBox(target: String) {
+        if (target.isBlank()) return
         boxIp = target
         status = "Conectando a $target..."
         scope.launch {
             try {
-                withContext(Dispatchers.IO) { box.connect(target.trim()) }
+                withContext(Dispatchers.IO) { box.connect(target.trim(), keyPair = keyPair) }
                 prefs.edit().putString("ip", target.trim()).apply()
                 status = "TV Box conectado (${box.host})"
             } catch (e: Exception) {
                 status = "Falha: ${e.message}"
+            }
+        }
+    }
+
+    fun lgScan() {
+        status = "Procurando TV LG na rede..."
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { NetworkScanner.scan(port = 8080) }
+            lgFound = list
+            status = if (list.isEmpty())
+                "Nenhuma TV LG encontrada (ela precisa estar ligada e na rede)."
+            else "Encontrei ${list.size}. Toque pra usar como IP da LG."
+        }
+    }
+
+    fun wakeLg() {
+        if (lgMac.isBlank()) { status = "Digite o MAC da TV LG pra ligar."; return }
+        status = "Enviando sinal pra ligar a TV..."
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { WakeOnLan.send(lgMac.trim()) }
+                prefs.edit().putString("lg_mac", lgMac.trim()).apply()
+                status = "Sinal enviado. Se a TV suportar, vai ligar."
+            } catch (e: Exception) {
+                status = "Falha ao enviar: ${e.message}"
             }
         }
     }
@@ -160,6 +208,11 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                 status = "Falha no pareamento: ${e.message}"
             }
         }
+    }
+
+    // Reconecta sozinho no último TV Box ao abrir o app.
+    LaunchedEffect(Unit) {
+        if (device == "box" && boxIp.isNotBlank()) connectBox(boxIp)
     }
 
     Column(
@@ -245,6 +298,37 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                 enabled = lgIp.isNotBlank() && lgPin.isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
             ) { Text("2) Parear") }
+
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { lgScan() },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("🔍 Procurar TV LG na rede") }
+            if (lgFound.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                lgFound.forEach { dev ->
+                    OutlinedButton(
+                        onClick = { lgIp = dev },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("📺  $dev") }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = lgMac,
+                onValueChange = { lgMac = it },
+                label = { Text("MAC da TV (pra ligar): AA:BB:CC:DD:EE:FF") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = { wakeLg() },
+                enabled = lgMac.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("⚡ Ligar TV (Wake-on-LAN)") }
         }
 
         Spacer(Modifier.height(6.dp))

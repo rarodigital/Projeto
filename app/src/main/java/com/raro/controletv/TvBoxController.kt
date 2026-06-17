@@ -1,5 +1,6 @@
 package com.raro.controletv
 
+import dadb.AdbKeyPair
 import dadb.Dadb
 
 /** Códigos de tecla do Android (input keyevent). */
@@ -32,10 +33,11 @@ class TvBoxController {
     var host: String = ""
         private set
 
-    /** Conecta no TV Box. Lança exceção se falhar (sem rede / ADB desligado / não pareado). */
-    fun connect(ip: String, port: Int = 5555) {
+    /** Conecta no TV Box. Passe um [keyPair] persistente pra a TV lembrar a autorização
+     * e NÃO pedir "Permitir depuração USB?" toda vez. Lança exceção se falhar. */
+    fun connect(ip: String, port: Int = 5555, keyPair: AdbKeyPair? = null) {
         disconnect()
-        val d = Dadb.create(ip, port)
+        val d = if (keyPair != null) Dadb.create(ip, port, keyPair) else Dadb.create(ip, port)
         // teste rápido pra confirmar que o shell responde
         d.shell("echo ok")
         dadb = d
