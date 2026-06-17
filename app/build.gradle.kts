@@ -43,5 +43,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // ADB direto do celular (conecta no TV Box na porta 5555)
-    implementation("dev.mobile:dadb:1.2.10")
+    implementation("dev.mobile:dadb:1.2.9")
 }
