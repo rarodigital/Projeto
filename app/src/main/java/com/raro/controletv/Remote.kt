@@ -32,16 +32,27 @@ object Remote {
         }
     }
 
-    // ---- Operações só do Box (roteadas pelo transporte) ----
-    fun openUrl(url: String) = if (useReceiver) boxReceiver.openUrl(url) else box.openUrl(url)
-    fun youtubeSearch(q: String) = if (useReceiver) boxReceiver.youtubeSearch(q) else box.youtubeSearch(q)
-    fun boxText(t: String) = if (useReceiver) boxReceiver.text(t) else box.text(t)
-    fun launchApp(pkg: String) = if (useReceiver) boxReceiver.launchApp(pkg) else box.launchApp(pkg)
+    // ---- Operações só do Box (roteadas pelo transporte). Retornam "ok" ou o erro. ----
+    fun openUrl(url: String): String =
+        if (useReceiver) boxReceiver.openUrl(url) else { box.openUrl(url); "ok" }
+    fun youtubeSearch(q: String): String =
+        if (useReceiver) boxReceiver.youtubeSearch(q) else { box.youtubeSearch(q); "ok" }
+    fun boxText(t: String): String =
+        if (useReceiver) boxReceiver.text(t) else { box.text(t); "ok" }
+    fun launchApp(pkg: String): String =
+        if (useReceiver) boxReceiver.launchApp(pkg) else { box.launchApp(pkg); "ok" }
 
     /** Lista de apps do Box como pares (nome, pacote). */
     fun listApps(): List<Pair<String, String>> =
         if (useReceiver) boxReceiver.listApps()
         else box.listUserApps().map { it to it }
+
+    // ---- Mouse / touchpad (gestos na tela do Box) ----
+    fun boxTap(x: Int, y: Int) = if (useReceiver) boxReceiver.tap(x, y) else box.tap(x, y)
+    fun boxSwipe(x1: Int, y1: Int, x2: Int, y2: Int, dur: Int) =
+        if (useReceiver) boxReceiver.swipe(x1, y1, x2, y2, dur) else box.swipe(x1, y1, x2, y2, dur)
+    fun boxScreenSize(): Pair<Int, Int> =
+        if (useReceiver) boxReceiver.screenW to boxReceiver.screenH else box.screenSize()
 
     val boxHost: String get() = if (useReceiver) boxReceiver.host else box.host
 }

@@ -17,6 +17,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -159,6 +161,9 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     var castUrl by remember { mutableStateOf("") }
     var ytQuery by remember { mutableStateOf("") }
 
+    // Resolução da tela do Box (pra mapear o mouse/touchpad)
+    var boxScreen by remember { mutableStateOf(0 to 0) }
+
     // Atalhos fixados (nome bonito -> pacote)
     fun loadFavs(): List<Pair<String, String>> =
         (prefs.getString("favs", "") ?: "")
@@ -193,6 +198,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { box.connect(target.trim(), keyPair = keyPair) }
+                boxScreen = withContext(Dispatchers.IO) { box.screenSize() }
                 prefs.edit().putString("ip", target.trim()).apply()
                 status = "TV Box conectado (${box.host})"
             } catch (e: Exception) {
@@ -210,8 +216,10 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             try {
                 val acc = withContext(Dispatchers.IO) {
                     Remote.boxReceiver.connect(target.trim())
+                    Remote.boxReceiver.fetchSize()
                     Remote.boxReceiver.accessibilityReady()
                 }
+                boxScreen = Remote.boxReceiver.screenW to Remote.boxReceiver.screenH
                 prefs.edit().putString("ip", target.trim()).apply()
                 status = if (acc) "Box conectado pelo app ✅"
                 else "Conectado, mas LIGUE a acessibilidade no app do Box (setas/OK não vão sem ela)."
@@ -282,19 +290,17 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         }
     }
 
-    // Touchpad: arrasta pra rolar a tela do Box (um swipe a partir do centro).
-    fun boxScroll(dx: Float, dy: Float) {
+    // Como boxOp, mas mostra o resultado (ok / não encontrado / erro) que a TV devolveu.
+    fun boxAction(label: String, op: () -> String) {
+        status = label
         scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    val (w, h) = box.screenSize()
-                    val cx = w / 2
-                    val cy = h / 2
-                    val nx = (cx + dx).toInt().coerceIn(0, w - 1)
-                    val ny = (cy + dy).toInt().coerceIn(0, h - 1)
-                    box.swipe(cx, cy, nx, ny, 120)
-                }
-            } catch (e: Exception) { status = "Erro: ${e.message}" }
+            val r = try { withContext(Dispatchers.IO) { op() } } catch (e: Exception) { "erro: ${e.message}" }
+            status = when {
+                r.startsWith("ok") -> "Feito ✅"
+                r.startsWith("not-found") -> "App não encontrado nesse aparelho."
+                r.startsWith("no-accessibility") -> "Ligue a acessibilidade no app do Box."
+                else -> r
+            }
         }
     }
 
@@ -341,19 +347,19 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     fun sendText() {
         if (typed.isBlank()) return
         val t = typed
-        boxOp("Digitando na TV...") { Remote.boxText(t) }
+        boxAction("Digitando na TV...") { Remote.boxText(t) }
     }
 
     fun castOpen() {
         if (castUrl.isBlank()) return
         val u = castUrl
-        boxOp("Abrindo na TV...") { Remote.openUrl(u) }
+        boxAction("Abrindo na TV...") { Remote.openUrl(u) }
     }
 
     fun ytSearch() {
         if (ytQuery.isBlank()) return
         val q = ytQuery
-        boxOp("Buscando \"$q\" na TV...") { Remote.youtubeSearch(q) }
+        boxAction("Buscando \"$q\" na TV...") { Remote.youtubeSearch(q) }
     }
 
     fun lgInput() = boxOp("Trocando entrada da TV...") { lg.switchInput() }
@@ -594,7 +600,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = { boxOp("Abrindo $name...") { Remote.launchApp(pkg) } },
+                        onClick = { boxAction("Abrindo $name...") { Remote.launchApp(pkg) } },
                         modifier = Modifier.weight(1f)
                     ) { Text(name) }
                     Spacer(Modifier.width(6.dp))
@@ -685,40 +691,54 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                 OutlinedButton(onClick = { boxOp("Enter...") { box.enter() } }) { Text("Enter") }
             }
 
-            // ===== Touchpad (rolar a tela) =====
+            // ===== Mouse (este quadro = a tela da TV) =====
             Spacer(Modifier.height(18.dp))
             Divider()
             Spacer(Modifier.height(12.dp))
-            Text("🖱️ Touchpad — arraste pra rolar, toque = OK", style = MaterialTheme.typography.titleMedium)
+            Text("🖱️ Mouse — este quadro é a tela da TV: toque = clique, arraste = arrastar.", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(160.dp)
+                    .aspectRatio(16f / 9f)
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
-                    .pointerInput(Unit) {
-                        detectTapGestures { act(RemoteAction.OK) }
-                    }
-                    .pointerInput(Unit) {
-                        var accX = 0f
-                        var accY = 0f
-                        detectDragGestures(
-                            onDragStart = { accX = 0f; accY = 0f },
-                            onDragEnd = {
-                                // escala o gesto pra um swipe perceptível na TV
-                                if (kotlin.math.abs(accX) > 30f || kotlin.math.abs(accY) > 30f) {
-                                    boxScroll(accX * 1.4f, accY * 1.4f)
-                                }
-                            }
-                        ) { change, dragAmount ->
-                            change.consume()
-                            accX += dragAmount.x
-                            accY += dragAmount.y
-                        }
-                    },
-                contentAlignment = Alignment.Center
             ) {
-                Text("deslize aqui", style = MaterialTheme.typography.bodyMedium)
+                val padW = constraints.maxWidth.toFloat()
+                val padH = constraints.maxHeight.toFloat()
+                fun toTv(px: Float, py: Float): Pair<Int, Int> {
+                    val w = if (boxScreen.first > 0) boxScreen.first else 1920
+                    val h = if (boxScreen.second > 0) boxScreen.second else 1080
+                    val x = (px / padW * w).toInt().coerceIn(0, w - 1)
+                    val y = (py / padH * h).toInt().coerceIn(0, h - 1)
+                    return x to y
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(boxScreen) {
+                            detectTapGestures { off ->
+                                val (x, y) = toTv(off.x, off.y)
+                                scope.launch { try { withContext(Dispatchers.IO) { Remote.boxTap(x, y) } } catch (_: Exception) {} }
+                            }
+                        }
+                        .pointerInput(boxScreen) {
+                            var startX = 0f; var startY = 0f; var curX = 0f; var curY = 0f
+                            detectDragGestures(
+                                onDragStart = { o -> startX = o.x; startY = o.y; curX = o.x; curY = o.y },
+                                onDragEnd = {
+                                    val (x1, y1) = toTv(startX, startY)
+                                    val (x2, y2) = toTv(curX, curY)
+                                    scope.launch { try { withContext(Dispatchers.IO) { Remote.boxSwipe(x1, y1, x2, y2, 200) } } catch (_: Exception) {} }
+                                }
+                            ) { change, drag -> change.consume(); curX += drag.x; curY += drag.y }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (boxScreen.first > 0) "toque onde você quer clicar na TV" else "conecte no Box primeiro",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
 
             // ===== Play on TV / Cast =====
@@ -779,7 +799,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             Text("Apps do TV Box", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = { boxOp("Abrindo YouTube...") { Remote.openUrl("https://www.youtube.com/") } }) { Text("YouTube") }
+                OutlinedButton(onClick = { boxAction("Abrindo YouTube...") { Remote.openUrl("https://www.youtube.com/") } }) { Text("YouTube") }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(onClick = { loadApps() }, enabled = !loadingApps) {
                     Text(if (loadingApps) "..." else "📋 Meus apps")
@@ -807,7 +827,7 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         OutlinedButton(
-                            onClick = { boxOp("Abrindo $name...") { Remote.launchApp(pkg) } },
+                            onClick = { boxAction("Abrindo $name...") { Remote.launchApp(pkg) } },
                             modifier = Modifier.weight(1f)
                         ) { Text(name) }
                         Spacer(Modifier.width(6.dp))

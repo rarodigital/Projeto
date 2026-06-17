@@ -33,6 +33,7 @@ class ReceiverService : Service() {
         private const val CHANNEL = "receiver"
         private const val NOTIF_ID = 7
         const val VERSION = "1.0"
+        private const val LEANBACK = "android.intent.category.LEANBACK_LAUNCHER"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -122,6 +123,24 @@ class ReceiverService : Service() {
 
             path == "/power" -> { acc?.powerDialog(); "ok" }
 
+            path == "/size" -> sizeStr()
+
+            path == "/tap" -> {
+                val x = params["x"]?.toIntOrNull(); val y = params["y"]?.toIntOrNull()
+                if (acc == null) "no-accessibility"
+                else if (x != null && y != null) { acc.tap(x, y); "ok" } else "bad"
+            }
+
+            path == "/swipe" -> {
+                val x1 = params["x1"]?.toIntOrNull(); val y1 = params["y1"]?.toIntOrNull()
+                val x2 = params["x2"]?.toIntOrNull(); val y2 = params["y2"]?.toIntOrNull()
+                val dur = params["dur"]?.toIntOrNull() ?: 120
+                if (acc == null) "no-accessibility"
+                else if (x1 != null && y1 != null && x2 != null && y2 != null) {
+                    acc.swipe(x1, y1, x2, y2, dur); "ok"
+                } else "bad"
+            }
+
             path == "/launch" -> {
                 val pkg = params["pkg"] ?: return "no-pkg"
                 launch(pkg)
@@ -165,28 +184,54 @@ class ReceiverService : Service() {
     }
 
     private fun launch(pkg: String): String {
-        val intent = packageManager.getLaunchIntentForPackage(pkg) ?: return "not-found"
+        var intent = packageManager.getLaunchIntentForPackage(pkg)
+        if (intent == null) {
+            // apps de TV (leanback) não têm launcher comum
+            val lb = Intent(Intent.ACTION_MAIN)
+                .addCategory(LEANBACK)
+                .setPackage(pkg)
+            val ri = packageManager.queryIntentActivities(lb, 0).firstOrNull()
+            if (ri != null) {
+                intent = Intent(Intent.ACTION_MAIN)
+                    .addCategory(LEANBACK)
+                    .setClassName(ri.activityInfo.packageName, ri.activityInfo.name)
+            }
+        }
+        if (intent == null) return "not-found"
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try { startActivity(intent); "ok" } catch (e: Exception) { "fail" }
     }
 
     private fun openUrl(url: String): String {
+        var u = url.trim()
+        if (!u.contains("://")) u = "https://$u"
         return try {
             startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
             "ok"
-        } catch (e: Exception) { "fail" }
+        } catch (e: Exception) { "fail: ${e.message}" }
     }
 
     private fun listApps(): String {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val pm = packageManager
-        return pm.queryIntentActivities(intent, 0)
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val leanback = Intent(Intent.ACTION_MAIN).addCategory(LEANBACK)
+        val all = pm.queryIntentActivities(launcher, 0) + pm.queryIntentActivities(leanback, 0)
+        return all
             .map { (it.loadLabel(pm)?.toString() ?: it.activityInfo.packageName) to it.activityInfo.packageName }
             .distinctBy { it.second }
             .sortedBy { it.first.lowercase() }
             .joinToString("\n") { "${it.first}\t${it.second}" }
+    }
+
+    private fun sizeStr(): String {
+        return try {
+            val wm = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+            val dm = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(dm)
+            "${dm.widthPixels}x${dm.heightPixels}"
+        } catch (e: Exception) { "1920x1080" }
     }
 
     private fun buildNotification(): Notification {

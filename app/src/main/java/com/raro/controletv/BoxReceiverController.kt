@@ -20,6 +20,11 @@ class BoxReceiverController {
     var connected: Boolean = false
         private set
 
+    var screenW: Int = 0
+        private set
+    var screenH: Int = 0
+        private set
+
     private fun get(path: String): String {
         val conn = (URL("http://$host:$PORT$path").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -67,12 +72,26 @@ class BoxReceiverController {
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    fun openUrl(url: String) { get("/open?url=${enc(url)}") }
-    fun youtubeSearch(query: String) {
+    fun openUrl(url: String): String = get("/open?url=${enc(url)}")
+    fun youtubeSearch(query: String): String =
         get("/open?url=${enc("https://www.youtube.com/results?search_query=$query")}")
+    fun text(t: String): String = get("/text?t=${enc(t)}")
+    fun launchApp(pkg: String): String = get("/launch?pkg=${enc(pkg)}")
+
+    // ---- Mouse (gestos de toque na tela da TV) ----
+    /** Busca a resolução da tela do Box (pra mapear o touchpad). */
+    fun fetchSize() {
+        try {
+            val r = get("/size").trim()        // "1920x1080"
+            val p = r.split("x")
+            if (p.size == 2) { screenW = p[0].trim().toInt(); screenH = p[1].trim().toInt() }
+        } catch (_: Exception) {}
     }
-    fun text(t: String) { get("/text?t=${enc(t)}") }
-    fun launchApp(pkg: String) { get("/launch?pkg=${enc(pkg)}") }
+
+    fun tap(x: Int, y: Int) { get("/tap?x=$x&y=$y") }
+    fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, dur: Int = 120) {
+        get("/swipe?x1=$x1&y1=$y1&x2=$x2&y2=$y2&dur=$dur")
+    }
 
     /** Lista apps do Box: pares (nome, pacote). */
     fun listApps(): List<Pair<String, String>> =

@@ -1,11 +1,14 @@
 package com.raro.controletv.receiver
 
 import android.accessibilityservice.AccessibilityService
-import android.view.KeyEvent
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.os.Bundle
+import android.util.DisplayMetrics
 import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import android.os.Bundle
 
 /**
  * Executa os comandos do controle DENTRO do TV Box, sem ADB nem root.
@@ -48,32 +51,71 @@ class RemoteAccessibilityService : AccessibilityService() {
     fun right() = move(View.FOCUS_RIGHT)
 
     fun ok(): Boolean {
-        val node = focusedNode() ?: return false
-        // tenta o nó clicável mais próximo subindo na árvore
-        var n: AccessibilityNodeInfo? = node
-        while (n != null) {
-            if (n.isClickable) return n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            n = n.parent
+        val node = focusedNode()
+        if (node != null) {
+            var n: AccessibilityNodeInfo? = node
+            while (n != null) {
+                if (n.isClickable) return n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                n = n.parent
+            }
+            if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
         }
-        return node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        // sem nó focado clicável: clica no centro da tela (UIs de toque)
+        val (w, h) = screenSize()
+        tap(w / 2, h / 2)
+        return true
     }
 
     private fun move(direction: Int): Boolean {
+        // 1) tenta mover o foco (funciona em alguns apps)
         val node = focusedNode()
         val next = node?.focusSearch(direction)
-        if (next != null) {
-            val ok = next.performAction(AccessibilityNodeInfo.ACTION_FOCUS) ||
-                next.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
-            if (ok) return true
+        if (next != null && next.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) return true
+        // 2) fallback universal: deslize no sentido do movimento (UIs de toque)
+        val (w, h) = screenSize()
+        val cx = w / 2
+        val cy = h / 2
+        val dx = (w * 0.20f).toInt()
+        val dy = (h * 0.20f).toInt()
+        when (direction) {
+            // seta ▼ = rolar pra baixo = deslizar pra cima
+            View.FOCUS_DOWN -> swipe(cx, cy, cx, cy - dy, 120)
+            View.FOCUS_UP -> swipe(cx, cy, cx, cy + dy, 120)
+            View.FOCUS_RIGHT -> swipe(cx, cy, cx - dx, cy, 120)
+            View.FOCUS_LEFT -> swipe(cx, cy, cx + dx, cy, 120)
         }
-        // fallback: rolar a tela no sentido do movimento
-        val root = rootInActiveWindow ?: return false
-        val scrollAction = when (direction) {
-            View.FOCUS_DOWN, View.FOCUS_RIGHT -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            else -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        return true
+    }
+
+    // ---- Gestos de toque (modo mouse) ----
+    fun tap(x: Int, y: Int) {
+        val p = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val g = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(p, 0, 60))
+            .build()
+        dispatchGesture(g, null, null)
+    }
+
+    fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int) {
+        val p = Path().apply {
+            moveTo(x1.toFloat(), y1.toFloat())
+            lineTo(x2.toFloat(), y2.toFloat())
         }
-        val scrollable = findScrollable(root)
-        return scrollable?.performAction(scrollAction) ?: false
+        val g = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(p, 0, durationMs.toLong().coerceIn(20, 2000)))
+            .build()
+        dispatchGesture(g, null, null)
+    }
+
+    fun screenSize(): Pair<Int, Int> {
+        return try {
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            val dm = DisplayMetrics()
+            @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(dm)
+            dm.widthPixels to dm.heightPixels
+        } catch (e: Exception) {
+            1920 to 1080
+        }
     }
 
     private fun focusedNode(): AccessibilityNodeInfo? {
