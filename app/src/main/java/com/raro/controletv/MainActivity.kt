@@ -691,55 +691,57 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
                 OutlinedButton(onClick = { boxOp("Enter...") { box.enter() } }) { Text("Enter") }
             }
 
-            // ===== Mouse (este quadro = a tela da TV) =====
+            // ===== Trackpad (cursor na tela da TV, igual notebook) =====
             Spacer(Modifier.height(18.dp))
             Divider()
             Spacer(Modifier.height(12.dp))
-            Text("🖱️ Mouse — este quadro é a tela da TV: toque = clique, arraste = arrastar.", style = MaterialTheme.typography.titleMedium)
+            Text("🖱️ Trackpad — deslize como no notebook; toque = clique.", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
-            BoxWithConstraints(
+            val sens = 2.4f
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
+                    .height(220.dp)
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
-            ) {
-                val padW = constraints.maxWidth.toFloat()
-                val padH = constraints.maxHeight.toFloat()
-                fun toTv(px: Float, py: Float): Pair<Int, Int> {
-                    val w = if (boxScreen.first > 0) boxScreen.first else 1920
-                    val h = if (boxScreen.second > 0) boxScreen.second else 1080
-                    val x = (px / padW * w).toInt().coerceIn(0, w - 1)
-                    val y = (py / padH * h).toInt().coerceIn(0, h - 1)
-                    return x to y
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(boxScreen) {
-                            detectTapGestures { off ->
-                                val (x, y) = toTv(off.x, off.y)
-                                scope.launch { try { withContext(Dispatchers.IO) { Remote.boxTap(x, y) } } catch (_: Exception) {} }
+                    .pointerInput(Unit) {
+                        detectTapGestures {
+                            scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseShow(true); Remote.mouseClick() } } catch (_: Exception) {} }
+                        }
+                    }
+                    .pointerInput(Unit) {
+                        var accX = 0f; var accY = 0f; var last = 0L
+                        fun flush() {
+                            val sx = accX; val sy = accY; accX = 0f; accY = 0f
+                            if (sx != 0f || sy != 0f) scope.launch {
+                                try { withContext(Dispatchers.IO) { Remote.mouseMove((sx * sens).toInt(), (sy * sens).toInt()) } } catch (_: Exception) {}
                             }
                         }
-                        .pointerInput(boxScreen) {
-                            var startX = 0f; var startY = 0f; var curX = 0f; var curY = 0f
-                            detectDragGestures(
-                                onDragStart = { o -> startX = o.x; startY = o.y; curX = o.x; curY = o.y },
-                                onDragEnd = {
-                                    val (x1, y1) = toTv(startX, startY)
-                                    val (x2, y2) = toTv(curX, curY)
-                                    scope.launch { try { withContext(Dispatchers.IO) { Remote.boxSwipe(x1, y1, x2, y2, 200) } } catch (_: Exception) {} }
-                                }
-                            ) { change, drag -> change.consume(); curX += drag.x; curY += drag.y }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (boxScreen.first > 0) "toque onde você quer clicar na TV" else "conecte no Box primeiro",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+                        detectDragGestures(
+                            onDragStart = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseShow(true) } } catch (_: Exception) {} } },
+                            onDragEnd = { flush() }
+                        ) { change, drag ->
+                            change.consume(); accX += drag.x; accY += drag.y
+                            val now = System.currentTimeMillis()
+                            if (now - last > 45) { last = now; flush() }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("deslize aqui pra mover o cursor", style = MaterialTheme.typography.bodySmall)
             }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.Center) {
+                Button(onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseClick() } } catch (_: Exception) {} } }) { Text("🖱️ Clique") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseScroll(1) } } catch (_: Exception) {} } }) { Text("Rolar ↓") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseScroll(-1) } } catch (_: Exception) {} } }) { Text("Rolar ↑") }
+            }
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = { scope.launch { try { withContext(Dispatchers.IO) { Remote.mouseShow(false) } } catch (_: Exception) {} } },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Esconder cursor") }
 
             // ===== Play on TV / Cast =====
             Spacer(Modifier.height(18.dp))

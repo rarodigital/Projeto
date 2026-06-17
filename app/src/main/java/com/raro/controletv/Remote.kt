@@ -47,12 +47,11 @@ object Remote {
         if (useReceiver) boxReceiver.listApps()
         else box.listUserApps().map { it to it }
 
-    // ---- Mouse / touchpad (gestos na tela do Box) ----
-    fun boxTap(x: Int, y: Int) = if (useReceiver) boxReceiver.tap(x, y) else box.tap(x, y)
-    fun boxSwipe(x1: Int, y1: Int, x2: Int, y2: Int, dur: Int) =
-        if (useReceiver) boxReceiver.swipe(x1, y1, x2, y2, dur) else box.swipe(x1, y1, x2, y2, dur)
-    fun boxScreenSize(): Pair<Int, Int> =
-        if (useReceiver) boxReceiver.screenW to boxReceiver.screenH else box.screenSize()
+    // ---- Trackpad com cursor na tela (só no modo receiver) ----
+    fun mouseShow(on: Boolean) { if (useReceiver) boxReceiver.mouse(on) }
+    fun mouseMove(dx: Int, dy: Int) { if (useReceiver) boxReceiver.move(dx, dy) }
+    fun mouseClick() { if (useReceiver) boxReceiver.click() }
+    fun mouseScroll(d: Int) { if (useReceiver) boxReceiver.scroll(d) }
 
     val boxHost: String get() = if (useReceiver) boxReceiver.host else box.host
 }

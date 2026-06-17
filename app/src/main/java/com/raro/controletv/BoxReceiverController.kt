@@ -93,6 +93,12 @@ class BoxReceiverController {
         get("/swipe?x1=$x1&y1=$y1&x2=$x2&y2=$y2&dur=$dur")
     }
 
+    // ---- Trackpad com cursor na tela ----
+    fun mouse(on: Boolean) { get("/mouse?on=${if (on) 1 else 0}") }
+    fun move(dx: Int, dy: Int) { get("/move?dx=$dx&dy=$dy") }
+    fun click() { get("/click") }
+    fun scroll(d: Int) { get("/scroll?d=$d") }
+
     /** Lista apps do Box: pares (nome, pacote). */
     fun listApps(): List<Pair<String, String>> =
         get("/apps").lineSequence()

@@ -2,8 +2,13 @@ package com.raro.controletv.receiver
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.graphics.Color
 import android.graphics.Path
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.View
 import android.view.WindowManager
@@ -116,6 +121,77 @@ class RemoteAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             1920 to 1080
         }
+    }
+
+    // ---- Cursor do mouse (trackpad de verdade) ----
+    // Desenha uma bolinha por cima da tela (TYPE_ACCESSIBILITY_OVERLAY, não precisa de permissão).
+    private val main = Handler(Looper.getMainLooper())
+    private var cursor: View? = null
+    private var cursorLp: WindowManager.LayoutParams? = null
+    private var cx = 0f
+    private var cy = 0f
+    private var cursorSize = 0
+
+    fun showCursor() = main.post {
+        if (cursor != null) return@post
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val (w, h) = screenSize()
+        cx = w / 2f; cy = h / 2f
+        cursorSize = (28 * resources.displayMetrics.density).toInt()
+        val v = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.WHITE)
+                setStroke(maxOf(3, cursorSize / 10), Color.parseColor("#1565C0"))
+            }
+            alpha = 0.9f
+        }
+        val lp = WindowManager.LayoutParams(
+            cursorSize, cursorSize,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            x = (cx - cursorSize / 2).toInt()
+            y = (cy - cursorSize / 2).toInt()
+        }
+        try { wm.addView(v, lp); cursor = v; cursorLp = lp } catch (_: Exception) {}
+    }
+
+    fun hideCursor() = main.post {
+        cursor?.let { v ->
+            try { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) } catch (_: Exception) {}
+        }
+        cursor = null; cursorLp = null
+    }
+
+    /** Move o cursor por um delta (vindo do trackpad do celular). */
+    fun moveCursor(dx: Float, dy: Float) = main.post {
+        if (cursor == null) { showCursor(); return@post }
+        val (w, h) = screenSize()
+        cx = (cx + dx).coerceIn(0f, w - 1f)
+        cy = (cy + dy).coerceIn(0f, h - 1f)
+        val lp = cursorLp ?: return@post
+        lp.x = (cx - cursorSize / 2).toInt()
+        lp.y = (cy - cursorSize / 2).toInt()
+        try { (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(cursor, lp) } catch (_: Exception) {}
+    }
+
+    /** Clica na posição atual do cursor. */
+    fun clickCursor() {
+        if (cursor == null) showCursor()
+        tap(cx.toInt(), cy.toInt())
+    }
+
+    /** Rola na posição do cursor (swipe vertical). */
+    fun scrollCursor(amount: Float) {
+        val (_, h) = screenSize()
+        val dist = (h * 0.25f)
+        val toY = (cy + if (amount > 0) dist else -dist)
+        swipe(cx.toInt(), cy.toInt(), cx.toInt(), toY.toInt(), 200)
     }
 
     private fun focusedNode(): AccessibilityNodeInfo? {

@@ -141,6 +141,22 @@ class ReceiverService : Service() {
                 } else "bad"
             }
 
+            // ---- Mouse (trackpad com cursor na tela) ----
+            path == "/mouse" -> {
+                if (acc == null) return "no-accessibility"
+                if (params["on"] == "0") acc.hideCursor() else acc.showCursor(); "ok"
+            }
+            path == "/move" -> {
+                val dx = params["dx"]?.toFloatOrNull() ?: 0f
+                val dy = params["dy"]?.toFloatOrNull() ?: 0f
+                if (acc == null) "no-accessibility" else { acc.moveCursor(dx, dy); "ok" }
+            }
+            path == "/click" -> { if (acc == null) "no-accessibility" else { acc.clickCursor(); "ok" } }
+            path == "/scroll" -> {
+                val d = params["d"]?.toFloatOrNull() ?: 1f
+                if (acc == null) "no-accessibility" else { acc.scrollCursor(d); "ok" }
+            }
+
             path == "/launch" -> {
                 val pkg = params["pkg"] ?: return "no-pkg"
                 launch(pkg)
