@@ -164,7 +164,7 @@ fun Trackpad(
                     if (pr.size >= 2) {
                         val dy = pr.map { it.position.y - it.previousPosition.y }.average().toFloat()
                         accS += dy; pr.forEach { it.consume() }
-                        if (abs(accS) > 70f) { onScroll(if (accS > 0) 1 else -1); accS = 0f }
+                        if (abs(accS) > 48f) { onScroll(if (accS > 0) 1 else -1); accS = 0f }
                     } else {
                         val c = pr[0]
                         val dx = c.position.x - c.previousPosition.x
@@ -189,7 +189,7 @@ fun ScrollStrip(modifier: Modifier = Modifier, onScroll: (Int) -> Unit) {
             var acc = 0f
             detectVerticalDragGestures(onDragEnd = { acc = 0f }) { change, d ->
                 change.consume(); acc += d
-                if (abs(acc) > 55f) { onScroll(if (acc > 0) 1 else -1); acc = 0f }
+                if (abs(acc) > 40f) { onScroll(if (acc > 0) 1 else -1); acc = 0f }
             }
         }
     )
@@ -398,10 +398,18 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     val tabs = listOf("🎮" to "Controle", "🖱️" to "Mouse", "📺" to "Apps", "🎬" to "Cast", "🔌" to "Conexão")
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // Top bar
+        // Top bar com seletor de aparelho sempre visível
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Text("Controle TV", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Controle TV", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Row {
+                    FilterChip(selected = device == "box", onClick = { device = "box"; prefs.edit().putString("device", "box").apply() }, label = { Text("📦 Box") })
+                    Spacer(Modifier.width(8.dp))
+                    FilterChip(selected = device == "lg", onClick = { device = "lg"; prefs.edit().putString("device", "lg").apply() }, label = { Text("📺 LG") })
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text("Controlando: ${if (device == "lg") "TV LG" else "TV Box"} · $status", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Divider(color = MaterialTheme.colorScheme.surfaceVariant)
 

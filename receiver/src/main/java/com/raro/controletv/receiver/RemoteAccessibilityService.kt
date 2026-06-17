@@ -74,22 +74,38 @@ class RemoteAccessibilityService : AccessibilityService() {
     }
 
     private fun move(direction: Int): Boolean {
-        // 1) tenta mover o foco (funciona em alguns apps)
+        // 1) tenta mover o FOCO (apps que usam foco padrão do Android — como o CetusPlay faz)
         val node = focusedNode()
-        val next = node?.focusSearch(direction)
-        if (next != null && next.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) return true
-        // 2) fallback universal: deslize no sentido do movimento (UIs de toque)
+        if (node != null) {
+            val next = node.focusSearch(direction)
+            if (next != null && next != node) {
+                if (next.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) return true
+                if (next.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)) return true
+            }
+        }
+        // 2) tenta ROLAR um container (listas/grades) no sentido do movimento
+        val root = rootInActiveWindow
+        if (root != null) {
+            val scrollable = findScrollable(root)
+            if (scrollable != null) {
+                val act = when (direction) {
+                    View.FOCUS_DOWN, View.FOCUS_RIGHT -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    else -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                }
+                if (scrollable.performAction(act)) return true
+            }
+        }
+        // 3) fallback universal: deslize curto no sentido do movimento (UIs de toque)
         val (w, h) = screenSize()
         val cx = w / 2
         val cy = h / 2
-        val dx = (w * 0.20f).toInt()
-        val dy = (h * 0.20f).toInt()
+        val dx = (w * 0.15f).toInt()
+        val dy = (h * 0.15f).toInt()
         when (direction) {
-            // seta ▼ = rolar pra baixo = deslizar pra cima
-            View.FOCUS_DOWN -> swipe(cx, cy, cx, cy - dy, 120)
-            View.FOCUS_UP -> swipe(cx, cy, cx, cy + dy, 120)
-            View.FOCUS_RIGHT -> swipe(cx, cy, cx - dx, cy, 120)
-            View.FOCUS_LEFT -> swipe(cx, cy, cx + dx, cy, 120)
+            View.FOCUS_DOWN -> swipe(cx, cy, cx, cy - dy, 90)
+            View.FOCUS_UP -> swipe(cx, cy, cx, cy + dy, 90)
+            View.FOCUS_RIGHT -> swipe(cx, cy, cx - dx, cy, 90)
+            View.FOCUS_LEFT -> swipe(cx, cy, cx + dx, cy, 90)
         }
         return true
     }
