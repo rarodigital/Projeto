@@ -118,6 +118,18 @@ class TvBoxController {
         sh("monkey -p $pkg -c android.intent.category.LAUNCHER 1")
     }
 
+    /** "Play on TV": abre uma URL/vídeo/link na TV (deixa o app da TV reproduzir). */
+    fun openUrl(url: String) {
+        val u = url.trim().replace("\"", "")
+        sh("am start -a android.intent.action.VIEW -d \"$u\"")
+    }
+
+    /** "Search to Cast": abre a busca do YouTube já com o termo na TV. */
+    fun youtubeSearch(query: String) {
+        val q = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        sh("am start -a android.intent.action.VIEW -d \"https://www.youtube.com/results?search_query=$q\"")
+    }
+
     /** YouTube: tenta a versão de TV; se não tiver, a versão comum. */
     fun launchYoutube() {
         val out = sh("monkey -p com.google.android.youtube.tv -c android.intent.category.LAUNCHER 1")

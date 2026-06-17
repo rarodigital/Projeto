@@ -154,6 +154,10 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
     // Teclado
     var typed by remember { mutableStateOf("") }
 
+    // Play on TV / busca
+    var castUrl by remember { mutableStateOf("") }
+    var ytQuery by remember { mutableStateOf("") }
+
     // Atalhos fixados (nome bonito -> pacote)
     fun loadFavs(): List<Pair<String, String>> =
         (prefs.getString("favs", "") ?: "")
@@ -305,6 +309,34 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
         if (typed.isBlank()) return
         val t = typed
         boxOp("Digitando na TV...") { box.text(t) }
+    }
+
+    fun castOpen() {
+        if (castUrl.isBlank()) return
+        val u = castUrl
+        boxOp("Abrindo na TV...") { box.openUrl(u) }
+    }
+
+    fun ytSearch() {
+        if (ytQuery.isBlank()) return
+        val q = ytQuery
+        boxOp("Buscando \"$q\" na TV...") { box.youtubeSearch(q) }
+    }
+
+    fun lgInput() = boxOp("Trocando entrada da TV...") { lg.switchInput() }
+
+    // Espelhamento: o app abre a tela de "Transmitir tela" do PRÓPRIO Android.
+    // Não dá pra espelhar de dentro do app — quem espelha é o sistema (Miracast/Smart View),
+    // e a TV/Box precisa suportar e estar com o Miracast ligado.
+    fun openCastPanel() {
+        try {
+            ctx.startActivity(
+                Intent("android.settings.CAST_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            status = "Escolha a TV/Box na lista pra espelhar (precisa ter Miracast ligado na TV)."
+        } catch (e: Exception) {
+            status = "Seu Android não abriu a tela de espelhar: ${e.message}"
+        }
     }
 
     // Liga o controle flutuante (bolha por cima dos outros apps).
@@ -562,6 +594,13 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             OutlinedButton(onClick = { act(RemoteAction.POWER) }) { Text("Power") }
         }
 
+        if (device == "lg") {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = { lgInput() }, modifier = Modifier.fillMaxWidth()) {
+                Text("🔀 Trocar entrada / fonte (Input)")
+            }
+        }
+
         if (device == "box") {
             // ===== Teclado (digitar texto na TV) =====
             Spacer(Modifier.height(18.dp))
@@ -620,6 +659,57 @@ fun RemoteScreen(box: TvBoxController, lg: LgTvController, prefs: SharedPreferen
             ) {
                 Text("deslize aqui", style = MaterialTheme.typography.bodyMedium)
             }
+
+            // ===== Play on TV / Cast =====
+            Spacer(Modifier.height(18.dp))
+            Divider()
+            Spacer(Modifier.height(12.dp))
+            Text("▶️ Play on TV / Cast", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = castUrl,
+                onValueChange = { castUrl = it },
+                label = { Text("Link pra abrir na TV (vídeo, YouTube, site)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(6.dp))
+            Button(
+                onClick = { castOpen() },
+                enabled = castUrl.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Abrir na TV") }
+
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = ytQuery,
+                onValueChange = { ytQuery = it },
+                label = { Text("Buscar no YouTube da TV") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = { ytSearch() },
+                enabled = ytQuery.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("🔎 Buscar e jogar na TV") }
+
+            // ===== Espelhamento =====
+            Spacer(Modifier.height(18.dp))
+            Divider()
+            Spacer(Modifier.height(12.dp))
+            Text("📲 Espelhar tela do celular", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "O espelhamento (com áudio) é feito pelo próprio Android. Ligue o Miracast no TV Box e toque abaixo pra escolher ele na lista.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { openCastPanel() },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("📲 Espelhar tela (Smart View / Transmitir)") }
 
             // ===== Atalhos do TV Box =====
             Spacer(Modifier.height(18.dp))

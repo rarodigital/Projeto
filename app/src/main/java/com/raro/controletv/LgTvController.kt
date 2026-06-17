@@ -61,15 +61,20 @@ class LgTvController {
         paired = true
     }
 
-    /** Traduz a ação genérica para o código UDAP e envia. */
-    fun send(action: RemoteAction) {
-        val code = lgCode(action)
+    /** Envia um código de tecla UDAP cru (HandleKeyInput). */
+    fun sendKey(code: Int) {
         post(
             "/udap/api/command",
             "<?xml version=\"1.0\" encoding=\"utf-8\"?><envelope><api type=\"command\">" +
                 "<name>HandleKeyInput</name><value>$code</value></api></envelope>"
         )
     }
+
+    /** Traduz a ação genérica para o código UDAP e envia. */
+    fun send(action: RemoteAction) = sendKey(lgCode(action))
+
+    /** Troca a entrada/fonte da TV (botão INPUT do controle). Código UDAP 47 (a confirmar por modelo). */
+    fun switchInput() = sendKey(47)
 
     // Códigos UDAP (NetCast). Alguns podem variar por modelo — ajustar se necessário.
     private fun lgCode(a: RemoteAction): Int = when (a) {
