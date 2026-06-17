@@ -1,6 +1,6 @@
 package com.raro.controletv
 
-import dev.mobile.dadb.Dadb
+import dadb.Dadb
 
 /** Códigos de tecla do Android (input keyevent). */
 object Key {
