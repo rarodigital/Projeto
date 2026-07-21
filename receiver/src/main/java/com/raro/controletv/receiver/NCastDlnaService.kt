@@ -89,6 +89,10 @@ class NCastDlnaService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Precisa promover a foreground JÁ (senão o Android derruba o app com
+        // "did not then call Service.startForeground()" quando iniciado via
+        // startForegroundService) — só depois disso checar a licença.
+        startForeground(1001, notification())
         if (!NServerAuth.isPremium(this)) {
             stopSelf()
             return
@@ -101,7 +105,6 @@ class NCastDlnaService : Service() {
             launchYouTube(url)
         }
         youtubeLounge.ensureStarted()
-        startForeground(1001, notification())
         acquireLocks()
         startHttpServer()
         startSsdpResponder()
