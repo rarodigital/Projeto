@@ -142,64 +142,76 @@ class NCastDlnaService : Service() {
         }
     }
 
-    /** Escuta M-SEARCH multicast (porta 1900) e responde unicast quando o ST bate com nossos targets. */
+    /** Escuta M-SEARCH multicast (porta 1900) e responde unicast quando o ST bate com nossos targets.
+     * Logo após o boot o Wi-Fi pode ainda não estar associado quando este serviço sobe (via
+     * BootReceiver) — nesse caso o MulticastSocket/joinGroup falha. Antes o erro matava a thread
+     * pra sempre (só voltava a funcionar abrindo o app manualmente); agora tenta de novo a cada 3s
+     * até a rede ficar pronta, sem precisar reabrir nada. */
     private fun startSsdpResponder() = Thread({
-        try {
-            MulticastSocket(SSDP_PORT).use { socket ->
-                socket.reuseAddress = true
-                socket.joinGroup(java.net.InetAddress.getByName(SSDP_ADDRESS))
-                val buf = ByteArray(4096)
-                while (running.get()) {
-                    try {
-                        val packet = DatagramPacket(buf, buf.size)
-                        socket.receive(packet)
-                        val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
-                        val firstLine = text.lineSequence().firstOrNull() ?: continue
-                        if (!firstLine.startsWith("M-SEARCH", ignoreCase = true)) continue
-                        val st = headerValue(text, "ST")
-                        if (st.isBlank()) continue
-                        val ip = localIp()
-                        val targets = rendererSearchTargets() + dialSearchTargets()
-                        val matches = st == "ssdp:all" || targets.any { it.equals(st, ignoreCase = true) }
-                        if (!matches) continue
-                        val isDial = dialSearchTargets().any { it.equals(st, ignoreCase = true) }
-                        val response = ssdpResponse(ip, st, isDial)
-                        val data = response.toByteArray(Charsets.UTF_8)
-                        socket.send(DatagramPacket(data, data.size, packet.address, packet.port))
-                    } catch (e: Exception) {
-                        if (!running.get()) break
+        while (running.get()) {
+            try {
+                MulticastSocket(SSDP_PORT).use { socket ->
+                    socket.reuseAddress = true
+                    socket.joinGroup(java.net.InetAddress.getByName(SSDP_ADDRESS))
+                    val buf = ByteArray(4096)
+                    while (running.get()) {
+                        try {
+                            val packet = DatagramPacket(buf, buf.size)
+                            socket.receive(packet)
+                            val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
+                            val firstLine = text.lineSequence().firstOrNull() ?: continue
+                            if (!firstLine.startsWith("M-SEARCH", ignoreCase = true)) continue
+                            val st = headerValue(text, "ST")
+                            if (st.isBlank()) continue
+                            val ip = localIp()
+                            val targets = rendererSearchTargets() + dialSearchTargets()
+                            val matches = st == "ssdp:all" || targets.any { it.equals(st, ignoreCase = true) }
+                            if (!matches) continue
+                            val isDial = dialSearchTargets().any { it.equals(st, ignoreCase = true) }
+                            val response = ssdpResponse(ip, st, isDial)
+                            val data = response.toByteArray(Charsets.UTF_8)
+                            socket.send(DatagramPacket(data, data.size, packet.address, packet.port))
+                        } catch (e: Exception) {
+                            if (!running.get()) break
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                if (running.get()) Thread.sleep(3000)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }, "ssdp-responder").apply { isDaemon = true; start() }
 
     private fun startSsdpAliveBroadcaster() = Thread({
         val target = InetSocketAddress(SSDP_ADDRESS, SSDP_PORT)
-        DatagramSocket().use { socket ->
-            while (running.get()) {
-                try {
-                    val ip = localIp()
-                    for (nt in rendererSearchTargets()) {
+        while (running.get()) {
+            try {
+                DatagramSocket().use { socket ->
+                    while (running.get()) {
                         try {
-                            val data = ssdpNotify(ip, nt, false).toByteArray(Charsets.UTF_8)
-                            socket.send(DatagramPacket(data, data.size, target))
-                            Thread.sleep(80)
+                            val ip = localIp()
+                            for (nt in rendererSearchTargets()) {
+                                try {
+                                    val data = ssdpNotify(ip, nt, false).toByteArray(Charsets.UTF_8)
+                                    socket.send(DatagramPacket(data, data.size, target))
+                                    Thread.sleep(80)
+                                } catch (e: Exception) {
+                                    Thread.sleep(5000)
+                                }
+                            }
+                            for (nt in dialSearchTargets()) {
+                                val data = ssdpNotify(ip, nt, true).toByteArray(Charsets.UTF_8)
+                                socket.send(DatagramPacket(data, data.size, target))
+                                Thread.sleep(80)
+                            }
+                            Thread.sleep(30000)
                         } catch (e: Exception) {
-                            Thread.sleep(5000)
+                            // segue tentando no próximo ciclo
                         }
                     }
-                    for (nt in dialSearchTargets()) {
-                        val data = ssdpNotify(ip, nt, true).toByteArray(Charsets.UTF_8)
-                        socket.send(DatagramPacket(data, data.size, target))
-                        Thread.sleep(80)
-                    }
-                    Thread.sleep(30000)
-                } catch (e: Exception) {
-                    // segue tentando no próximo ciclo
                 }
+            } catch (e: Exception) {
+                if (running.get()) Thread.sleep(3000)
             }
         }
     }, "ssdp-alive").apply { isDaemon = true; start() }

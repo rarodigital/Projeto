@@ -41,6 +41,7 @@ class LauncherActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        hideSystemUi()
         prefs = getSharedPreferences("launcher_prefs", Context.MODE_PRIVATE)
 
         val pad = dp(24)
@@ -83,6 +84,17 @@ class LauncherActivity : Activity() {
     override fun onResume() {
         super.onResume()
         rebuildGrid()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemUi()
+    }
+
+    /** Some a barra de status/navegação — sem isso a tela mostra "bordas" na TV (o launcher não ocupa 100%). */
+    private fun hideSystemUi() {
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = 5894
     }
 
     private fun rebuildGrid() {
