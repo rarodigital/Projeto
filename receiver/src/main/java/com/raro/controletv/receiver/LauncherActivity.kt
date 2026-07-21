@@ -12,6 +12,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.TypedValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -94,6 +95,8 @@ class LauncherActivity : Activity() {
 
         for (t in tiles) addTile(t)
         addAddTile()
+        addAppsTile()
+        addSettingsTile()
     }
 
     // ---- resolução de apps fixos ----
@@ -200,15 +203,24 @@ class LauncherActivity : Activity() {
         grid.addView(box, params)
     }
 
-    private fun addAddTile() {
-        val plus = TextView(this).apply {
-            text = "+"
+    private fun addAddTile() = addActionTile("+", "Adicionar app", dashed = true, iconSize = 32f) { showAppPicker() }
+
+    private fun addAppsTile() = addActionTile("▦", "Apps", iconSize = 28f) { showAllAppsAndLaunch() }
+
+    private fun addSettingsTile() = addActionTile("⚙", "Configurações", iconSize = 28f) {
+        try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) {}
+    }
+
+    /** Ladrilho genérico de ação (não abre um app fixo/favorito, executa [action] direto). */
+    private fun addActionTile(icon: String, label: String, dashed: Boolean = false, iconSize: Float = 28f, action: () -> Unit) {
+        val iconView = TextView(this).apply {
+            text = icon
             setTextColor(Color.WHITE)
-            textSize = 32f
+            textSize = iconSize
             gravity = Gravity.CENTER
         }
-        val label = TextView(this).apply {
-            text = "Adicionar app"
+        val labelView = TextView(this).apply {
+            text = label
             setTextColor(Color.LTGRAY)
             textSize = 12f
             gravity = Gravity.CENTER
@@ -218,16 +230,45 @@ class LauncherActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             isFocusable = true
-            background = tileBackground(dashed = true)
-            addView(plus)
-            addView(label)
-            setOnClickListener { showAppPicker() }
+            background = tileBackground(dashed)
+            addView(iconView)
+            addView(labelView)
+            setOnClickListener { action() }
         }
         val params = GridLayout.LayoutParams().apply {
             width = dp(120); height = dp(120)
             setMargins(dp(8), dp(8), dp(8), dp(8))
         }
         grid.addView(box, params)
+    }
+
+    /** Lista TODOS os apps instalados; tocar já abre (painel "Apps" tipo Fire TV/Chromecast/TV Box). */
+    private fun showAllAppsAndLaunch() {
+        val pm = packageManager
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val leanback = Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_LAUNCHER")
+        val apps = (pm.queryIntentActivities(launcher, 0) + pm.queryIntentActivities(leanback, 0))
+            .distinctBy { it.activityInfo.packageName }
+            .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
+            .sortedBy { it.first.lowercase() }
+
+        val listView = ListView(this)
+        listView.adapter = SimpleAdapter(
+            this, apps.map { mapOf("label" to it.first) },
+            android.R.layout.simple_list_item_1, arrayOf("label"), intArrayOf(android.R.id.text1)
+        )
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Todos os apps")
+            .setView(FrameLayout(this).apply {
+                addView(listView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(400)))
+            })
+            .setNegativeButton("Fechar", null)
+            .create()
+        listView.setOnItemClickListener { _, _, position, _ ->
+            dialog.dismiss()
+            launch(apps[position].second)
+        }
+        dialog.show()
     }
 
     private fun tileBackground(dashed: Boolean = false): StateListDrawable {

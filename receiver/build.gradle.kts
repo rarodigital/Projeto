@@ -11,8 +11,8 @@ android {
         applicationId = "com.raro.controletv.receiver"
         minSdk = 24
         targetSdk = 34
-        versionCode = 12
-        versionName = "2.1-launcher"
+        versionCode = 13
+        versionName = "2.2-launcher"
     }
 
     buildTypes {
