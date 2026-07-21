@@ -79,7 +79,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun startReceiver() {
         val i = Intent(this, ReceiverService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
+        val dlna = Intent(this, NCastDlnaService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(i)
+            startForegroundService(dlna)
+        } else {
+            startService(i)
+            startService(dlna)
+        }
     }
 
     private fun refresh() {

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="accessibility_desc">Permite que o app receba os comandos do controle do celular (setas, OK, voltar, etc.) e os execute na TV.</string>
+    <string name="ncast_receiver_name">NCast Receiver</string>
 </resources>

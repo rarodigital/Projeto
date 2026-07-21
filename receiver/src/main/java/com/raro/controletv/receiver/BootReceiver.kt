@@ -13,9 +13,15 @@ class BootReceiver : BroadcastReceiver() {
             a == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
             a == "android.intent.action.QUICKBOOT_POWERON"
         ) {
-            val i = Intent(context, ReceiverService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i)
-            else context.startService(i)
+            val remote = Intent(context, ReceiverService::class.java)
+            val dlna = Intent(context, NCastDlnaService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(remote)
+                context.startForegroundService(dlna)
+            } else {
+                context.startService(remote)
+                context.startService(dlna)
+            }
         }
     }
 }
