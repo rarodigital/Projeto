@@ -11,8 +11,8 @@ android {
         applicationId = "com.raro.controletv.receiver"
         minSdk = 24
         targetSdk = 34
-        versionCode = 11
-        versionName = "2.0-ncast-dlna"
+        versionCode = 12
+        versionName = "2.1-launcher"
     }
 
     buildTypes {
