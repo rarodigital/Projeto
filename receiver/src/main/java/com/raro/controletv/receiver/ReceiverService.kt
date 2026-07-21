@@ -34,6 +34,16 @@ class ReceiverService : Service() {
         private const val NOTIF_ID = 7
         const val VERSION = "1.0"
         private const val LEANBACK = "android.intent.category.LEANBACK_LAUNCHER"
+
+        /**
+         * Token exigido em toda chamada (?token=...) antes de rodar qualquer comando.
+         * Existe porque essa API vai ficar acessível de fora da rede local via túnel —
+         * sem isso, qualquer um que descobrisse a URL do túnel teria controle total do
+         * aparelho (D-pad, digitar texto, abrir apps). Mesmo padrão do X-Dark-Token do
+         * dark_agent (ver [[project_carioquinha_dark]]), só que como query param porque
+         * esse parser só lê a primeira linha da requisição, não os headers.
+         */
+        const val REMOTE_TOKEN = "f83e6f90c4c76c7bbe32be97d8c184712c26da23e5c53f28"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -71,7 +81,9 @@ class ReceiverService : Service() {
                 // "GET /path?query HTTP/1.1"
                 val parts = line.split(" ")
                 val target = if (parts.size >= 2) parts[1] else "/"
-                val body = route(target)
+                val query = target.substringAfter("?", "")
+                val token = query.split("&").firstOrNull { it.startsWith("token=") }?.substringAfter("=")
+                val body = if (token != REMOTE_TOKEN) "unauthorized" else route(target)
                 val out = c.getOutputStream()
                 val resp = "HTTP/1.1 200 OK\r\n" +
                     "Content-Type: text/plain; charset=utf-8\r\n" +

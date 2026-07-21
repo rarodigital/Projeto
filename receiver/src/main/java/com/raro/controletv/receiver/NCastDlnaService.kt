@@ -93,10 +93,15 @@ class NCastDlnaService : Service() {
         // "did not then call Service.startForeground()" quando iniciado via
         // startForegroundService) — só depois disso checar a licença.
         startForeground(1001, notification())
-        if (!NServerAuth.isPremium(this)) {
-            stopSelf()
-            return
-        }
+        // TEMP-BYPASS (2026-07-21, autorizado pelo Adalto): a checagem de premium ficou
+        // impossível de revalidar nesta instalação (não existe tela de login no app
+        // ainda) depois do uninstall que resolveu o problema de assinatura/Play Protect.
+        // Reativar assim que houver uma tela de login chamando NServerAuth.login/validate,
+        // ou confirmação de outro jeito de restaurar o premium salvo.
+        // if (!NServerAuth.isPremium(this)) {
+        //     stopSelf()
+        //     return
+        // }
         running.set(true)
         val name = getString(R.string.ncast_receiver_name)
         youtubeLounge = YouTubeLoungeSession(this, name) { url ->

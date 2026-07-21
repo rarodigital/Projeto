@@ -13,9 +13,12 @@ class BoxReceiverController {
 
     companion object {
         const val PORT = 8787
+        /** Mesmo valor de ReceiverService.REMOTE_TOKEN — exigido em toda chamada. */
+        private const val TOKEN = "f83e6f90c4c76c7bbe32be97d8c184712c26da23e5c53f28"
+
         /** Consulta o modelo do aparelho (Build.MODEL) num IP. Null se não responder. */
         fun fetchInfo(ip: String): String? = try {
-            val conn = (URL("http://$ip:$PORT/info").openConnection() as HttpURLConnection).apply {
+            val conn = (URL("http://$ip:$PORT/info?token=$TOKEN").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"; connectTimeout = 2500; readTimeout = 2500
             }
             try {
@@ -37,7 +40,8 @@ class BoxReceiverController {
         private set
 
     private fun get(path: String): String {
-        val conn = (URL("http://$host:$PORT$path").openConnection() as HttpURLConnection).apply {
+        val withToken = path + (if (path.contains("?")) "&" else "?") + "token=$TOKEN"
+        val conn = (URL("http://$host:$PORT$withToken").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 4000
             readTimeout = 4000
