@@ -36,7 +36,9 @@
         <activity
             android:name=".LauncherActivity"
             android:exported="true"
+            android:enabled="${enableLauncherHome}"
             android:launchMode="singleTask"
+            android:screenOrientation="${launcherOrientation}"
             android:theme="@style/Theme.AppCompat.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

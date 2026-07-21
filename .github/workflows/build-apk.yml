@@ -34,5 +34,6 @@ jobs:
           name: controle-tv-apk
           path: |
             app/build/outputs/apk/debug/app-debug.apk
-            receiver/build/outputs/apk/debug/receiver-debug.apk
+            receiver/build/outputs/apk/launcher/debug/receiver-launcher-debug.apk
+            receiver/build/outputs/apk/normal/debug/receiver-normal-debug.apk
           if-no-files-found: error

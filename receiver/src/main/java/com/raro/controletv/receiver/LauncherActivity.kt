@@ -184,7 +184,11 @@ class LauncherActivity : Activity() {
             background = tileBackground()
             addView(icon)
             addView(label)
-            setOnClickListener { launch(t.pkg) }
+            setOnClickListener {
+                // UniTV é o receptor NCast: o atalho deve abrir a tela de transmissão do
+                // próprio NCast Receiver (CastPlayerActivity), não o app UniTV nativo do S9.
+                if (t.label == "UniTV") openTransmission() else launch(t.pkg)
+            }
             if (!t.fixed) {
                 setOnLongClickListener {
                     AlertDialog.Builder(this@LauncherActivity)
@@ -309,6 +313,10 @@ class LauncherActivity : Activity() {
             dialog.dismiss()
         }
         dialog.show()
+    }
+
+    private fun openTransmission() {
+        startActivity(Intent(this, CastPlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun launch(pkg: String) {

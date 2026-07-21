@@ -11,8 +11,26 @@ android {
         applicationId = "com.raro.controletv.receiver"
         minSdk = 24
         targetSdk = 34
-        versionCode = 13
-        versionName = "2.2-launcher"
+        versionCode = 14
+        versionName = "2.3"
+    }
+
+    flavorDimensions += "home"
+    productFlavors {
+        // versão com launcher próprio (HOME), travado em paisagem — pro S9/DeX espelhando na TV
+        create("launcher") {
+            dimension = "home"
+            versionNameSuffix = "-launcher"
+            manifestPlaceholders["enableLauncherHome"] = "true"
+            manifestPlaceholders["launcherOrientation"] = "landscape"
+        }
+        // versão sem launcher (mantém o launcher normal do aparelho) — uso como app comum
+        create("normal") {
+            dimension = "home"
+            versionNameSuffix = "-normal"
+            manifestPlaceholders["enableLauncherHome"] = "false"
+            manifestPlaceholders["launcherOrientation"] = "unspecified"
+        }
     }
 
     buildTypes {
