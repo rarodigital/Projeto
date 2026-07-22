@@ -27,6 +27,13 @@ class BootReceiver : BroadcastReceiver() {
                 context.startService(dlna)
             }
             reconnectBluetoothAudio(context)
+        } else if (a == BluetoothAdapter.ACTION_STATE_CHANGED) {
+            // Radio ligando sozinho (ex.: ao acordar da tela bloqueada, sem reboot) - reconecta
+            // no(s) dispositivo(s) de audio ja pareado(s), mesma logica do boot.
+            val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)
+            if (state == BluetoothAdapter.STATE_ON) {
+                reconnectBluetoothAudio(context)
+            }
         }
     }
 
