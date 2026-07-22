@@ -133,13 +133,20 @@ class MirrorServer(
 
         fun feedNal(start: Int, end: Int) {
             if (end <= start) return
-            val inIndex = dec.dequeueInputBuffer(10_000)
-            if (inIndex >= 0) {
-                val inBuf = dec.getInputBuffer(inIndex) ?: return
-                inBuf.clear()
-                inBuf.put(buffer, start, end - start)
-                dec.queueInputBuffer(inIndex, 0, end - start, System.nanoTime() / 1000, 0)
+            // Antes: se nao tivesse buffer de entrada livre em 10ms, o NAL era descartado em
+            // silencio - causava a corrupcao visual (bloco/degrade) e travadas, porque um
+            // pedaco do quadro sumia sem avisar. Agora insiste ate conseguir (drenando saida
+            // no meio, que e o que libera novos buffers de entrada), sem descartar frame.
+            var inIndex = -1
+            while (inIndex < 0 && running.get()) {
+                inIndex = dec.dequeueInputBuffer(10_000)
+                if (inIndex < 0) drainOutput()
             }
+            if (inIndex < 0) return
+            val inBuf = dec.getInputBuffer(inIndex) ?: return
+            inBuf.clear()
+            inBuf.put(buffer, start, end - start)
+            dec.queueInputBuffer(inIndex, 0, end - start, System.nanoTime() / 1000, 0)
             drainOutput()
         }
 
