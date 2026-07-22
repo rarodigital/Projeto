@@ -11,8 +11,19 @@ android {
         applicationId = "com.raro.controletv.receiver"
         minSdk = 24
         targetSdk = 34
-        versionCode = 15
-        versionName = "2.4"
+        versionCode = 16
+        versionName = "2.5"
+    }
+
+    signingConfigs {
+        // keystore fixa e comitada: builds do CI sempre assinam igual, então
+        // atualizar o app não pede mais desinstalar antes (assinatura não muda a cada run).
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     flavorDimensions += "home"

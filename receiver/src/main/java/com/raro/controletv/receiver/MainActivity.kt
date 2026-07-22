@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.raro.controletv.receiver.mirror.MirrorActivity
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -49,11 +50,16 @@ class MainActivity : AppCompatActivity() {
             text = "2) Ligar receptor"
             setOnClickListener { startReceiver(); refresh() }
         }
+        val mirrorBtn = Button(this).apply {
+            text = "3) Espelhar Tela do PC"
+            setOnClickListener { startActivity(Intent(this@MainActivity, MirrorActivity::class.java)) }
+        }
 
         root.addView(title)
         root.addView(status)
         root.addView(accBtn)
         root.addView(startBtn)
+        root.addView(mirrorBtn)
 
         val help = TextView(this).apply {
             text = "Como usar:\n\n" +

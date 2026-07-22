@@ -48,6 +48,11 @@
         </activity>
 
         <activity
+            android:name=".mirror.MirrorActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
             android:name=".CastPlayerActivity"
             android:exported="false"
             android:screenOrientation="landscape"
