@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Collections
 
@@ -103,9 +104,11 @@ class MirrorActivity : AppCompatActivity() {
         try {
             val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
             for (intf in interfaces) {
+                if (!intf.isUp || intf.isLoopback) continue
                 val addrs = Collections.list(intf.inetAddresses)
                 for (addr in addrs) {
-                    if (!addr.isLoopbackAddress && addr.hostAddress?.contains(":") == false) {
+                    // só IPv4 da rede local (192.168.x/10.x/172.16-31.x) - pula VPN/tunnel (ex.: Cloudflare WARP)
+                    if (addr is Inet4Address && !addr.isLoopbackAddress && addr.isSiteLocalAddress) {
                         return addr.hostAddress ?: "?"
                     }
                 }
